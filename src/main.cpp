@@ -14,6 +14,7 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <ESPmDNS.h>
+#include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include <Preferences.h>
 #include "config.h"
@@ -47,6 +48,8 @@ static const int   KO_POINTS      = 6;     // shoving someone off
 static const int   FALL_PENALTY   = 3;
 static const int   MIN_FIELD      = 4;     // humans + bots
 static const int   LED_PIN        = 2;
+static const int   BOOT_PIN       = 0;     // hold at power-up to force hotspot mode
+static const int   AP_MAX_CLIENTS = 8;
 // power-ups
 static const float POWERUP_LIFE   = 12;    // seconds an untouched power-up stays
 static const float POWERUP_GAP_MIN = 5, POWERUP_GAP_MAX = 10;
@@ -116,7 +119,9 @@ static float ledT = 0;
 
 WebServer http(80);
 WebSocketsServer ws(81);
+WiFiUDP dnsUdp;
 Preferences prefs;
+static bool hotspot = false;   // running our own access point instead of home WiFi
 
 // --------------------------------------------------------------- helpers ---
 static float frand(float a, float b) { return a + (b - a) * (esp_random() / 4294967295.0f); }
@@ -584,31 +589,86 @@ static void onWs(uint8_t num, WStype_t type, uint8_t *payload, size_t len) {
 }
 
 // ------------------------------------------------------------------ setup ---
+// Minimal captive-portal DNS: answers every A query with our own IP.
+// (The core's DNSServer replies NXDOMAIN to queries carrying EDNS, which many phones send.)
+static void handleDns() {
+  int len = dnsUdp.parsePacket();
+  if (len <= 0) return;
+  uint8_t buf[512];
+  if (len < 12 || len > (int)sizeof(buf) - 16) { dnsUdp.flush(); return; }
+  dnsUdp.read(buf, len);
+  if ((buf[2] & 0x80) || buf[4] || buf[5] != 1) return;     // only plain queries with one question
+  int z = 12;
+  while (z < len && buf[z]) z += buf[z] + 1;                 // walk the question name
+  int end = z + 5;                                           // zero byte + qtype + qclass
+  if (end > len) return;
+  bool typeA = buf[z + 1] == 0 && buf[z + 2] == 1;
+  buf[2] = 0x84 | (buf[2] & 0x01);                           // response, authoritative, keep RD
+  buf[3] = 0x80;                                             // RA, NOERROR
+  buf[6] = 0; buf[7] = typeA ? 1 : 0;                        // answers
+  buf[8] = buf[9] = buf[10] = buf[11] = 0;                   // drop authority + EDNS records
+  int n = end;
+  if (typeA) {
+    IPAddress ip = WiFi.softAPIP();
+    const uint8_t rr[] = {0xC0, 0x0C, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, ip[0], ip[1], ip[2], ip[3]};
+    memcpy(buf + n, rr, sizeof(rr));
+    n += sizeof(rr);
+  }
+  dnsUdp.beginPacket(dnsUdp.remoteIP(), dnsUdp.remotePort());
+  dnsUdp.write(buf, n);
+  dnsUdp.endPacket();
+}
+
+// Home WiFi if it's in range, otherwise (or with BOOT held at power-up) an own
+// hotspot with a captive portal, so phones on the go land straight in the game.
 static void setupWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(HOSTNAME);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting to WiFi");
-  for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) {
-    delay(500); Serial.print('.');
-    digitalWrite(LED_PIN, i & 1);
+
+  bool forceHotspot = digitalRead(BOOT_PIN) == LOW;
+#ifdef FORCE_HOTSPOT
+  forceHotspot = true;   // test builds only
+#endif
+  bool homeInRange = false;
+  if (!forceHotspot) {
+    Serial.print("Scanning for home WiFi... ");
+    int n = WiFi.scanNetworks();
+    for (int i = 0; i < n && !homeInRange; i++) homeInRange = WiFi.SSID(i) == WIFI_SSID;
+    WiFi.scanDelete();
+    Serial.println(homeInRange ? "found" : "not in range");
   }
-  digitalWrite(LED_PIN, LOW);
+
+  if (homeInRange) {
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    Serial.print("Connecting");
+    for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) {
+      delay(500); Serial.print('.');
+      digitalWrite(LED_PIN, i & 1);
+    }
+    digitalWrite(LED_PIN, LOW);
+  }
+
   if (WiFi.status() == WL_CONNECTED) {
     WiFi.setSleep(false);   // lower latency for the game
     Serial.printf("\nConnected! Play at http://%s/  or  http://%s.local/\n",
                   WiFi.localIP().toString().c_str(), HOSTNAME);
-  } else {
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(AP_SSID);
-    Serial.printf("\nNo WiFi – open hotspot \"%s\", play at http://%s/\n",
-                  AP_SSID, WiFi.softAPIP().toString().c_str());
+    return;
   }
+
+  WiFi.disconnect();
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID, nullptr, 1, 0, AP_MAX_CLIENTS);
+  WiFi.setSleep(false);
+  hotspot = true;
+  dnsUdp.begin(53);   // every hostname resolves to us -> captive portal
+  Serial.printf("\n%s – open hotspot \"%s\", play at http://%s/\n", forceHotspot ? "BOOT held" : "No home WiFi",
+                AP_SSID, WiFi.softAPIP().toString().c_str());
 }
 
 void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
+  pinMode(BOOT_PIN, INPUT_PULLUP);
   Serial.println("\n=== POLARITY ===");
 
   prefs.begin("polarity", false);
@@ -630,7 +690,11 @@ void setup() {
              playerCount(), humanCount(), ESP.getFreeHeap(), millis() / 1000);
     http.send(200, "application/json", b);
   });
-  http.onNotFound([] { http.sendHeader("Location", "/"); http.send(302); });
+  // unknown paths (incl. phones' connectivity checks in hotspot mode) land on the game
+  http.onNotFound([] {
+    http.sendHeader("Location", hotspot ? "http://" + WiFi.softAPIP().toString() + "/" : String("/"));
+    http.send(302);
+  });
   http.begin();
 
   ws.begin();
@@ -641,6 +705,7 @@ void setup() {
 void loop() {
   static uint32_t lastStep = millis(), lastSnap = 0;
   ArduinoOTA.handle();
+  if (hotspot) handleDns();
   http.handleClient();
   ws.loop();
 
