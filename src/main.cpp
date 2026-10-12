@@ -106,12 +106,14 @@ static int   lastWinner = -1;
 static char  lastWinnerName[13] = "";
 static int   lastWinnerScore = 0;
 
+static bool botsEnabled = true;   // off = duel mode, humans only (stored in NVS)
+
 static int  bestScore = 0;
 static char bestName[13] = "-";
 
 // events for the next snapshot: [type, a, b]
 //   1 = a collected an orb (b = points), 2 = a fell (b = who pushed, -1 none),
-//   3 = round over (a = winner), 4 = a grabbed power-up b
+//   3 = round over (a = winner), 4 = a grabbed power-up b, 5 = a switched bots on/off (b = 1/0)
 static int events[24][3];
 static int eventCount = 0;
 
@@ -205,7 +207,7 @@ static int addPlayer(bool bot, int client, const char *name) {
 
 static void balanceBots() {
   int humans = humanCount();
-  int want = humans == 0 ? 0 : max(0, MIN_FIELD - humans);
+  int want = humans == 0 || !botsEnabled ? 0 : max(0, MIN_FIELD - humans);
   int bots = 0;
   for (auto &p : players) if (p.used && p.bot) bots++;
   while (bots > want) {
@@ -504,8 +506,8 @@ static void step(float dt) {
 static char snap[3072];
 
 static void broadcastState() {
-  int n = snprintf(snap, sizeof(snap), "{\"im\":%d,\"t\":%d,\"R\":%d,\"hs\":[%d,\"%s\"],\"lw\":[%d,\"%s\",%d],\"p\":[",
-                   intermission ? 1 : 0, (int)((intermission ? interT : timeLeft) * 10), (int)arenaR,
+  int n = snprintf(snap, sizeof(snap), "{\"im\":%d,\"bt\":%d,\"t\":%d,\"R\":%d,\"hs\":[%d,\"%s\"],\"lw\":[%d,\"%s\",%d],\"p\":[",
+                   intermission ? 1 : 0, botsEnabled ? 1 : 0, (int)((intermission ? interT : timeLeft) * 10), (int)arenaR,
                    bestScore, bestName, lastWinner, lastWinnerName, lastWinnerScore);
   bool first = true;
   for (int i = 0; i < MAX_SLOTS; i++) {
@@ -585,6 +587,12 @@ static void onWs(uint8_t num, WStype_t type, uint8_t *payload, size_t len) {
     if (p.flipCd <= 0 && p.alive) { p.pol = -p.pol; p.flipCd = FLIP_COOLDOWN; }
   } else if (cmd == 's') {                 // surge
     if (p.surgeCd <= 0 && p.alive) { p.surgeT = SURGE_TIME; p.surgeCd = SURGE_COOLDOWN; }
+  } else if (cmd == 'b') {                 // toggle bots for everyone, fresh round so a duel starts at 0:0
+    botsEnabled = !botsEnabled;
+    prefs.putBool("bots", botsEnabled);
+    balanceBots();
+    startRound();
+    pushEvent(5, i, botsEnabled);
   }
 }
 
@@ -673,6 +681,7 @@ void setup() {
 
   prefs.begin("polarity", false);
   bestScore = prefs.getInt("best", 0);
+  botsEnabled = prefs.getBool("bots", true);
   if (prefs.isKey("bestName")) prefs.getString("bestName").toCharArray(bestName, sizeof(bestName));
 
   setupWifi();

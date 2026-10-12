@@ -42,6 +42,9 @@ const char PAGE[] PROGMEM = R"rawliteral(<!doctype html>
   #status{margin-top:10px;font-size:12px;color:#ffd23f;min-height:16px}
   .tbtn{position:fixed;bottom:26px;width:84px;height:84px;border-radius:50%;display:none;align-items:center;justify-content:center;
     font:700 15px ui-monospace,monospace;color:#fff;border:2px solid #ffffff44;background:#ffffff12;z-index:3}
+  #bots{position:fixed;top:78px;left:18px;font:700 12px ui-monospace,monospace;letter-spacing:1px;color:var(--ink);
+    background:#ffffff10;border:1px solid #3a4078;border-radius:6px;padding:6px 10px;cursor:pointer;display:none;z-index:3}
+  #bots.off{border-color:#ffd23f;color:#ffd23f}
   #bflip{right:22px} #bsurge{right:118px;width:66px;height:66px;bottom:34px;font-size:12px;border-color:#ffd23f88}
   body.touch .tbtn{display:flex} body.touch #self{bottom:120px}
 </style></head>
@@ -52,6 +55,7 @@ const char PAGE[] PROGMEM = R"rawliteral(<!doctype html>
 <div id="feed" class="panel"></div>
 <div id="self" class="panel"><div id="pol"></div><div id="surge"><i></i></div><span id="hint">SPACE flip &middot; SHIFT surge</span></div>
 <div id="banner" class="panel"></div>
+<div id="bots" title="B"></div>
 <div class="tbtn" id="bsurge">SURGE</div>
 <div class="tbtn" id="bflip">FLIP</div>
 
@@ -73,7 +77,7 @@ const char PAGE[] PROGMEM = R"rawliteral(<!doctype html>
     <b style="color:#ffd23f">&#10022; Magnetar</b> (all orbs come to you), <b>&#10042; Shockwave</b><br>
     &bull; Rare <b style="color:#ffd23f">golden orbs</b> are worth <b>+5</b> and pull toward everyone<br>
     <span class="k">WASD</span>/<span class="k">&larr;&uarr;&rarr;&darr;</span> move &nbsp;
-    <span class="k">SPACE</span> flip &nbsp; <span class="k">SHIFT</span> surge<br>
+    <span class="k">SPACE</span> flip &nbsp; <span class="k">SHIFT</span> surge &nbsp; <span class="k">B</span> bots on/off<br>
     On a phone: left thumb steers, buttons on the right.
   </div>
   <div class="best" id="best"></div>
@@ -178,6 +182,9 @@ function onEvent([type, a, b]) {
     else addFeed(names[a] + ' fell off', '#8a90b8');
     if (a === me) beep(300, .5, 'sawtooth', .06, -260);
     if (b === me) { beep(523, .1, 'square', .05); setTimeout(() => beep(784, .16, 'square', .05), 90); }
+  } else if (type === 5) {
+    addFeed(names[a] + (b ? ' brought the bots back' : ' started a duel – no bots'), GOLD);
+    beep(b ? 330 : 660, .2, 'triangle', .06, b ? -100 : 200);
   } else if (type === 3) {
     if (a === me) [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, .18, 'triangle', .07), i * 110));
   }
@@ -194,6 +201,7 @@ let joy = null, lastSent = '', lastSendT = 0;
 addEventListener('keydown', e => {
   if (!joined || e.target.tagName === 'INPUT') return;
   if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) flip(); }
+  else if (e.code === 'KeyB') { if (!e.repeat) send('b'); }
   else if (e.key === 'Shift') { if (!e.repeat) surge(); }
   keys[e.code] = true;
 });
@@ -211,7 +219,8 @@ function surge() { send('s'); beep(180, .35, 'sawtooth', .05, 400); }
 function bindBtn(id, fn) {
   $(id).addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); fn(); }, {passive: false});
 }
-bindBtn('bflip', flip); bindBtn('bsurge', surge);
+bindBtn('bflip', flip); bindBtn('bsurge', surge); bindBtn('bots', () => send('b'));
+$('bots').onclick = () => send('b');
 
 cv.addEventListener('touchstart', e => {
   e.preventDefault();
@@ -419,6 +428,11 @@ function frame(now) {
 }
 
 function hud(now, mine) {
+  const bt = $('bots');
+  bt.style.display = 'block';
+  bt.textContent = cur.bt ? 'BOTS: ON' : 'DUEL: NO BOTS';
+  bt.className = cur.bt ? '' : 'off';
+
   const t = Math.max(0, cur.t / 10);
   $('timer').innerHTML = cur.im ? '' : `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}` +
     (cur.R < ARENA0 ? '<small style="color:#ff6a6a">ARENA SHRINKING</small>' : '<small>ROUND</small>');

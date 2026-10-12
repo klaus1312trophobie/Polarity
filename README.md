@@ -11,7 +11,7 @@ Every player is a magnet. Equal polarities repel, opposite ones attract, and tha
 - **Surge** makes your magnet three times as strong for a moment
 - 2-minute rounds. The arena shrinks during the last 30 seconds
 - Power-ups (touch the hexagon): **Turbo**, **Anchor** (immune to magnets and heavy), **Magnetar** (all orbs come to you), **Shockwave**
-- Bots fill the field up to 4 players. Up to 8 humans can play
+- Bots fill the field up to 4 players, or switch them off (button or `B`) for a pure duel. Up to 8 humans can play
 
 Controls: WASD / arrow keys to move, Space to flip, Shift to surge. On phones, steer with your left thumb and use the buttons on the right.
 
