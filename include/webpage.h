@@ -68,6 +68,10 @@ const char PAGE[] PROGMEM = R"rawliteral(<!doctype html>
     &bull; Shove rivals off the edge: <b>+6</b> &middot; falling costs <b>&minus;3</b><br>
     &bull; <b style="color:#ffd23f">Surge</b> triples your magnetism for a moment<br>
     &bull; The arena shrinks in the last 30 seconds<br>
+    &bull; Touch a hexagon for a power-up:
+    <b style="color:#b6ff3f">&raquo; Turbo</b>, <b style="color:#b48cff">&#9875; Anchor</b> (immune &amp; heavy),
+    <b style="color:#ffd23f">&#10022; Magnetar</b> (all orbs come to you), <b>&#10042; Shockwave</b><br>
+    &bull; Rare <b style="color:#ffd23f">golden orbs</b> are worth <b>+5</b> and pull toward everyone<br>
     <span class="k">WASD</span>/<span class="k">&larr;&uarr;&rarr;&darr;</span> move &nbsp;
     <span class="k">SPACE</span> flip &nbsp; <span class="k">SHIFT</span> surge<br>
     On a phone: left thumb steers, buttons on the right.
@@ -77,6 +81,10 @@ const char PAGE[] PROGMEM = R"rawliteral(<!doctype html>
 
 <script>
 const PLUS = '#ff3b6b', MINUS = '#2ee6ff', GOLD = '#ffd23f', ARENA0 = 400, RANGE = 280, ORB_RANGE = 180;
+// power-ups: id -> [name, color, icon]
+const POWER = {1: ['TURBO', '#b6ff3f', '»'], 2: ['ANCHOR', '#b48cff', '⚓'],
+               3: ['MAGNETAR', '#ffd23f', '✦'], 4: ['SHOCKWAVE', '#ffffff', '✺']};
+const orbColor = pol => pol === 2 ? GOLD : pol > 0 ? PLUS : MINUS;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const $ = id => document.getElementById(id);
 const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -149,8 +157,20 @@ function onSnap(s) {
 function onEvent([type, a, b]) {
   const pa = cur.byId[a];
   if (type === 1) {
-    if (pa) burst(pa[1], pa[2], pa[3] > 0 ? PLUS : MINUS, 10, 120);
-    if (a === me) beep(660, .09, 'triangle', .07, 500);
+    const gold = b > 1;
+    if (pa) burst(pa[1], pa[2], gold ? GOLD : pa[3] > 0 ? PLUS : MINUS, gold ? 30 : 10, gold ? 200 : 120);
+    if (gold) addFeed(names[a] + ' grabbed a golden orb +' + b, GOLD);
+    if (a === me) gold ? [880, 1175, 1568].forEach((f, i) => setTimeout(() => beep(f, .12, 'triangle', .07), i * 70))
+                       : beep(660, .09, 'triangle', .07, 500);
+  } else if (type === 4) {
+    const [nm, col] = POWER[b];
+    addFeed(names[a] + ' grabbed ' + nm, col);
+    if (pa) {
+      burst(pa[1], pa[2], col, 24, 180);
+      if (b === 4) effects.push({ring: 1, x: pa[1], y: pa[2], t: 0, big: 1});
+    }
+    if (b === 4) beep(90, .5, 'sawtooth', .09, -50);
+    else if (a === me) beep(440, .25, 'square', .05, 600);
   } else if (type === 2) {
     const last = prev && prev.byId[a];
     if (last) { burst(last[1], last[2], '#ffffff', 26, 220); effects.push({ring: 1, x: last[1], y: last[2], t: 0}); }
@@ -278,12 +298,13 @@ function frame(now) {
     let x = o[0], y = o[1];
     const q = prev && prev.o[i];
     if (q && q[2] === o[2] && Math.hypot(q[0] - x, q[1] - y) < 120) { x = q[0] + (x - q[0]) * a; y = q[1] + (y - q[1]) * a; }
-    const col = o[2] > 0 ? PLUS : MINUS;
+    const col = orbColor(o[2]), gold = o[2] === 2;
     if (mine && mine.p[5]) {
       const d = Math.hypot(x - mine.pos[0], y - mine.pos[1]);
-      if (d < ORB_RANGE) {
-        const attract = o[2] !== mine.p[3];
-        ctx.globalAlpha = (1 - d / ORB_RANGE) * .55;
+      const range = ORB_RANGE * (mine.p[10] === 3 ? 1.6 : 1);
+      if (d < range) {
+        const attract = gold || mine.p[10] === 3 || o[2] !== mine.p[3];
+        ctx.globalAlpha = (1 - d / range) * .55;
         ctx.strokeStyle = attract ? '#ffffff' : col; ctx.lineWidth = attract ? 1.5 : 1;
         ctx.setLineDash(attract ? [] : [3, 6]);
         ctx.beginPath(); ctx.moveTo(sx(mine.pos[0]), sy(mine.pos[1])); ctx.lineTo(sx(x), sy(y)); ctx.stroke();
@@ -291,11 +312,26 @@ function frame(now) {
       }
     }
     ctx.shadowBlur = 14; ctx.shadowColor = col; ctx.fillStyle = col;
-    ctx.beginPath(); ctx.arc(sx(x), sy(y), Math.max(3, 8 * S), 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+    const orbR = (gold ? 11 + Math.sin(now / 150) : 8) * S;
+    if (gold) ctx.shadowBlur = 26;
+    ctx.beginPath(); ctx.arc(sx(x), sy(y), Math.max(3, orbR), 0, 7); ctx.fill(); ctx.shadowBlur = 0;
     ctx.fillStyle = '#05060d'; ctx.font = `bold ${Math.max(8, 11 * S)}px monospace`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(o[2] > 0 ? '+' : '−', sx(x), sy(y) + .5);
+    ctx.fillText(gold ? '5' : o[2] > 0 ? '+' : '−', sx(x), sy(y) + .5);
   });
+
+  // power-up waiting on the field: a spinning hexagon, blinking before it vanishes
+  if (cur.u && cur.u.length && !(cur.u[3] < 30 && Math.floor(now / 120) % 2)) {
+    const [type, ux, uy] = cur.u, [, col, icon] = POWER[type], r = 15 * S, rot = now / 700;
+    ctx.shadowBlur = 22; ctx.shadowColor = col; ctx.strokeStyle = col; ctx.lineWidth = 2.5;
+    ctx.fillStyle = col + '22';
+    ctx.beginPath();
+    for (let k = 0; k < 6; k++) ctx.lineTo(sx(ux) + Math.cos(rot + k * Math.PI / 3) * r * 1.25, sy(uy) + Math.sin(rot + k * Math.PI / 3) * r * 1.25);
+    ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
+    ctx.fillStyle = col; ctx.font = `bold ${Math.max(12, 18 * S)}px monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(icon, sx(ux), sy(uy) + 1);
+  }
 
   // player <-> player tension arcs
   for (let i = 0; i < players.length; i++) for (let j = i + 1; j < players.length; j++) {
@@ -319,6 +355,27 @@ function frame(now) {
       ctx.strokeStyle = GOLD; ctx.lineWidth = 2; ctx.globalAlpha = .7;
       ctx.beginPath(); ctx.arc(sx(x), sy(y), r * (1.8 + .3 * Math.sin(now / 60)), 0, 7); ctx.stroke(); ctx.globalAlpha = 1;
     }
+    if (p[10]) {  // power-up aura
+      const pc = POWER[p[10]][1];
+      ctx.strokeStyle = pc; ctx.globalAlpha = p[11] < 15 && Math.floor(now / 100) % 2 ? .25 : .9;
+      if (p[10] === 1) {        // turbo: speed streaks behind
+        const q = prev && prev.byId[p[0]], vx = q ? p[1] - q[1] : 0, vy = q ? p[2] - q[2] : 0, l = Math.hypot(vx, vy);
+        if (l > 2) for (let k = -1; k <= 1; k++) {
+          const ox = -vy / l * k * 9 * S, oy = vx / l * k * 9 * S;
+          ctx.lineWidth = 2; ctx.beginPath();
+          ctx.moveTo(sx(x) + ox - vx / l * r, sy(y) + oy - vy / l * r);
+          ctx.lineTo(sx(x) + ox - vx / l * (r + 30 * S), sy(y) + oy - vy / l * (r + 30 * S)); ctx.stroke();
+        }
+      } else if (p[10] === 2) { // anchor: heavy double ring
+        ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(sx(x), sy(y), r + 9, 0, 7); ctx.stroke();
+        ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(sx(x), sy(y), r + 15, 0, 7); ctx.stroke();
+      } else if (p[10] === 3) { // magnetar: spinning dashed field
+        ctx.lineWidth = 2; ctx.setLineDash([6, 8]); ctx.lineDashOffset = -now / 20;
+        ctx.beginPath(); ctx.arc(sx(x), sy(y), ORB_RANGE * 1.6 * S, 0, 7); ctx.stroke();
+        ctx.setLineDash([]); ctx.lineDashOffset = 0;
+      }
+      ctx.globalAlpha = 1;
+    }
     ctx.shadowBlur = 26; ctx.shadowColor = col;
     ctx.fillStyle = col; ctx.beginPath(); ctx.arc(sx(x), sy(y), r, 0, 7); ctx.fill();
     ctx.shadowBlur = 0;
@@ -338,8 +395,9 @@ function frame(now) {
   effects = effects.filter(e => {
     e.t += dt;
     if (e.ring) {
-      ctx.strokeStyle = `rgba(255,255,255,${1 - e.t / .6})`; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(sx(e.x), sy(e.y), (20 + e.t * 260) * S, 0, 7); ctx.stroke();
+      const speed = e.big ? 440 : 260;   // shockwave rings reach SHOCK_RANGE
+      ctx.strokeStyle = `rgba(255,255,255,${1 - e.t / .6})`; ctx.lineWidth = e.big ? 6 : 3;
+      ctx.beginPath(); ctx.arc(sx(e.x), sy(e.y), (20 + e.t * speed) * S, 0, 7); ctx.stroke();
       return e.t < .6;
     }
     e.x += e.vx * dt; e.y += e.vy * dt; e.vx *= .94; e.vy *= .94;
@@ -380,6 +438,7 @@ function hud(now, mine) {
     $('pol').innerHTML = `<span style="color:${p[3] > 0 ? PLUS : MINUS};text-shadow:0 0 14px currentColor">${p[3] > 0 ? '⊕' : '⊖'}</span>`;
     $('surge').firstChild.style.width = (p[7] ? 100 - p[7] * 2 : 100) + '%';
     $('surge').firstChild.style.background = p[7] ? '#5a5f86' : GOLD;
+    if (p[10]) $('pol').innerHTML += ` <span style="font-size:15px;color:${POWER[p[10]][1]}">${POWER[p[10]][0]} ${Math.ceil(p[11] / 10)}s</span>`;
     if (!p[5] && !cur.im) $('pol').innerHTML = '<span style="font-size:15px;color:#ff6a6a">respawning...</span>';
   }
 

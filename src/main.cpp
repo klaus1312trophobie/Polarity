@@ -47,6 +47,21 @@ static const int   KO_POINTS      = 6;     // shoving someone off
 static const int   FALL_PENALTY   = 3;
 static const int   MIN_FIELD      = 4;     // humans + bots
 static const int   LED_PIN        = 2;
+// power-ups
+static const float POWERUP_LIFE   = 12;    // seconds an untouched power-up stays
+static const float POWERUP_GAP_MIN = 5, POWERUP_GAP_MAX = 10;
+static const float POWERUP_R      = 14;
+static const float EFFECT_TIME    = 6;
+static const float TURBO_ACCEL    = 1.6;
+static const float TURBO_SPEED    = 1.5;
+static const float ANCHOR_MASS    = 4;     // anchored players are heavy and ignore magnets
+static const float MAGNETAR_RANGE = 1.6;   // orb range multiplier
+static const float SHOCK_RANGE    = 260;
+static const float SHOCK_PUSH     = 950;
+static const float GOLD_CHANCE    = 0.05;  // chance a respawned orb is golden
+static const int   GOLD_POINTS    = 5;
+
+enum Effect : uint8_t { FX_NONE, FX_TURBO, FX_ANCHOR, FX_MAGNETAR, FX_SHOCK };
 
 static const char *BOT_NAMES[] = {"Volt", "Tesla", "Gauss", "Faraday", "Ohm", "Ampere"};
 
@@ -61,16 +76,22 @@ struct Player {
   float respawnT, flipCd, surgeT, surgeCd;
   int lastHitBy;
   float lastHitT;
+  uint8_t fx;               // active power-up effect
+  float fxT;
   // bot brain
   float thinkT, flipDelay;
   int8_t wantPol;
 };
 
-struct Orb { float x, y, vx, vy; int8_t pol; float hideT; };   // hideT > 0: collected, respawning
+struct Orb { float x, y, vx, vy; int8_t pol; bool gold; float hideT; };   // hideT > 0: collected, respawning
+
+struct PowerUp { uint8_t type; float x, y, t; };   // type FX_NONE: nothing on the field
 
 static Player players[MAX_SLOTS];
 static Orb orbs[MAX_ORBS];
 static int orbCount = 0;
+static PowerUp powerup = {FX_NONE, 0, 0, 0};
+static float powerupGap = 0;
 
 static float gameTime = 0;           // seconds since boot (sim clock)
 static float timeLeft = ROUND_TIME;
@@ -86,7 +107,8 @@ static int  bestScore = 0;
 static char bestName[13] = "-";
 
 // events for the next snapshot: [type, a, b]
-//   1 = a collected an orb, 2 = a fell (b = who pushed, -1 none), 3 = round over (a = winner)
+//   1 = a collected an orb (b = points), 2 = a fell (b = who pushed, -1 none),
+//   3 = round over (a = winner), 4 = a grabbed power-up b
 static int events[24][3];
 static int eventCount = 0;
 
@@ -134,6 +156,7 @@ static void spawnOrb(Orb &o) {
   o.x = cosf(a) * r; o.y = sinf(a) * r;
   o.vx = o.vy = 0;
   o.pol = (esp_random() & 1) ? 1 : -1;
+  o.gold = frand(0, 1) < GOLD_CHANCE;
   o.hideT = 0;
 }
 
@@ -142,6 +165,7 @@ static void resetPlayer(Player &p) {
   p.pol = (esp_random() & 1) ? 1 : -1;
   p.ix = p.iy = 0;
   p.flipCd = p.surgeT = p.surgeCd = 0;
+  p.fx = FX_NONE; p.fxT = 0;
   p.thinkT = 0; p.flipDelay = 0; p.wantPol = p.pol;
   spawnPlayer(p);
 }
@@ -153,6 +177,8 @@ static void startRound() {
   for (auto &p : players) if (p.used) resetPlayer(p);
   orbCount = min(MAX_ORBS, 3 + playerCount() / 2);
   for (int i = 0; i < orbCount; i++) spawnOrb(orbs[i]);
+  powerup.type = FX_NONE;
+  powerupGap = frand(3, 6);
 }
 
 static int addPlayer(bool bot, int client, const char *name) {
@@ -226,6 +252,12 @@ static void thinkBot(int idx, float dt) {
     }
     if (bo >= 0) { tx = orbs[bo].x - b.x; ty = orbs[bo].y - b.y; want = -orbs[bo].pol; }
 
+    // power-ups beat orbs unless they're much farther away
+    if (powerup.type != FX_NONE) {
+      float d = hypotf(powerup.x - b.x, powerup.y - b.y);
+      if (d < 220 || d < best * 1.3f) { tx = powerup.x - b.x; ty = powerup.y - b.y; }
+    }
+
     // a rival nearer the edge than us? repel them outward
     for (int i = 0; i < MAX_SLOTS; i++) {
       Player &e = players[i];
@@ -268,6 +300,46 @@ static void endRound() {
   pushEvent(3, lastWinner, top);
 }
 
+static void shockwave(int src) {
+  Player &s = players[src];
+  for (int j = 0; j < MAX_SLOTS; j++) {
+    Player &p = players[j];
+    if (j == src || !p.used || !p.alive) continue;
+    float dx = p.x - s.x, dy = p.y - s.y, d = hypotf(dx, dy);
+    if (d > SHOCK_RANGE || d < 0.01f) continue;
+    float push = (SHOCK_PUSH * (1 - d / SHOCK_RANGE) + 250) / (p.fx == FX_ANCHOR ? ANCHOR_MASS : 1);
+    p.vx += dx / d * push; p.vy += dy / d * push;
+    p.lastHitBy = src; p.lastHitT = gameTime;
+  }
+  for (int k = 0; k < orbCount; k++) {
+    Orb &o = orbs[k];
+    float dx = o.x - s.x, dy = o.y - s.y, d = hypotf(dx, dy);
+    if (o.hideT > 0 || d > SHOCK_RANGE || d < 0.01f) continue;
+    o.vx += dx / d * 500; o.vy += dy / d * 500;
+  }
+}
+
+static void updatePowerup(float dt) {
+  if (powerup.type == FX_NONE) {
+    powerupGap -= dt;
+    if (powerupGap > 0) return;
+    float a = frand(0, TWO_PI), r = sqrtf(frand(0, 1)) * arenaR * 0.65f;
+    powerup = {(uint8_t)(FX_TURBO + esp_random() % 4), cosf(a) * r, sinf(a) * r, POWERUP_LIFE};
+    return;
+  }
+  powerup.t -= dt;
+  bool gone = powerup.t <= 0 || hypotf(powerup.x, powerup.y) > arenaR - POWERUP_R;
+  for (int i = 0; i < MAX_SLOTS && !gone; i++) {
+    Player &p = players[i];
+    if (!p.used || !p.alive || hypotf(p.x - powerup.x, p.y - powerup.y) > PLAYER_R + POWERUP_R) continue;
+    if (powerup.type == FX_SHOCK) shockwave(i);
+    else { p.fx = powerup.type; p.fxT = EFFECT_TIME; }
+    pushEvent(4, i, powerup.type);
+    gone = true;
+  }
+  if (gone) { powerup.type = FX_NONE; powerupGap = frand(POWERUP_GAP_MIN, POWERUP_GAP_MAX); }
+}
+
 static void step(float dt) {
   gameTime += dt;
   if (ledT > 0) { ledT -= dt; digitalWrite(LED_PIN, ledT > 0); }
@@ -294,15 +366,19 @@ static void step(float dt) {
     if (p.flipCd > 0) p.flipCd -= dt;
     if (p.surgeT > 0) p.surgeT -= dt;
     if (p.surgeCd > 0) p.surgeCd -= dt;
+    if (p.fxT > 0 && (p.fxT -= dt) <= 0) p.fx = FX_NONE;
     if (!p.alive) {
       p.respawnT -= dt;
       if (p.respawnT <= 0) spawnPlayer(p);
       continue;
     }
     if (p.bot) thinkBot(i, dt);
-    ax[i] = p.ix * ACCEL;
-    ay[i] = p.iy * ACCEL;
+    float acc = ACCEL * (p.fx == FX_TURBO ? TURBO_ACCEL : 1);
+    ax[i] = p.ix * acc;
+    ay[i] = p.iy * acc;
   }
+
+  updatePowerup(dt);
 
   // magnetic forces between players
   for (int i = 0; i < MAX_SLOTS; i++) {
@@ -318,8 +394,8 @@ static void step(float dt) {
       float dc = max(d, 36.0f);
       float s = K_PLAYER * a.pol * b.pol * ma * mb / (dc * dc);   // >0 repel
       float nx = dx / d, ny = dy / d;
-      ax[i] -= s * nx; ay[i] -= s * ny;
-      ax[j] += s * nx; ay[j] += s * ny;
+      if (a.fx != FX_ANCHOR) { ax[i] -= s * nx; ay[i] -= s * ny; }
+      if (b.fx != FX_ANCHOR) { ax[j] += s * nx; ay[j] += s * ny; }
       if (fabsf(s) > 140) {
         a.lastHitBy = j; a.lastHitT = gameTime;
         b.lastHitBy = i; b.lastHitT = gameTime;
@@ -332,8 +408,9 @@ static void step(float dt) {
     Player &p = players[i];
     if (!p.used || !p.alive) continue;
     p.vx += ax[i] * dt; p.vy += ay[i] * dt;
-    float sp = hypotf(p.vx, p.vy);
-    if (sp > MAX_SPEED) { p.vx *= MAX_SPEED / sp; p.vy *= MAX_SPEED / sp; }
+    // soft speed cap: excess speed (from shockwaves, bumps) bleeds off over a few frames
+    float sp = hypotf(p.vx, p.vy), cap = MAX_SPEED * (p.fx == FX_TURBO ? TURBO_SPEED : 1);
+    if (sp > cap) { float k = max(cap / sp, 1 - 4 * dt); p.vx *= k; p.vy *= k; }
     float f = max(0.0f, 1 - FRICTION * dt);
     p.vx *= f; p.vy *= f;
     p.x += p.vx * dt; p.y += p.vy * dt;
@@ -349,13 +426,14 @@ static void step(float dt) {
       float dx = b.x - a.x, dy = b.y - a.y, d = hypotf(dx, dy);
       if (d >= 2 * PLAYER_R || d < 0.01f) continue;
       float nx = dx / d, ny = dy / d, overlap = 2 * PLAYER_R - d;
-      a.x -= nx * overlap / 2; a.y -= ny * overlap / 2;
-      b.x += nx * overlap / 2; b.y += ny * overlap / 2;
+      float wa = 1 / (a.fx == FX_ANCHOR ? ANCHOR_MASS : 1), wb = 1 / (b.fx == FX_ANCHOR ? ANCHOR_MASS : 1);
+      a.x -= nx * overlap * wa / (wa + wb); a.y -= ny * overlap * wa / (wa + wb);
+      b.x += nx * overlap * wb / (wa + wb); b.y += ny * overlap * wb / (wa + wb);
       float rel = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
       if (rel > 0) {
-        float imp = rel * 1.15f;   // a little extra bounce makes bumping fun
-        a.vx -= imp * nx; a.vy -= imp * ny;
-        b.vx += imp * nx; b.vy += imp * ny;
+        float imp = rel * 2.3f / (wa + wb);   // restitution > 1: a little extra bounce makes bumping fun
+        a.vx -= imp * wa * nx; a.vy -= imp * wa * ny;
+        b.vx += imp * wb * nx; b.vy += imp * wb * ny;
       }
       a.lastHitBy = j; a.lastHitT = gameTime;
       b.lastHitBy = i; b.lastHitT = gameTime;
@@ -372,16 +450,20 @@ static void step(float dt) {
       if (!p.used || !p.alive) continue;
       float dx = o.x - p.x, dy = o.y - p.y, d = hypotf(dx, dy);
       if (d < PLAYER_R + ORB_R) {
-        p.score++;
-        pushEvent(1, i, -1);
+        int pts = o.gold ? GOLD_POINTS : 1;
+        p.score += pts;
+        pushEvent(1, i, pts);
         spawnOrb(o);
         o.hideT = ORB_RESPAWN;
         goto nextOrb;
       }
-      if (d > ORB_RANGE) continue;
+      bool magnetar = p.fx == FX_MAGNETAR;
+      if (d > ORB_RANGE * (magnetar ? MAGNETAR_RANGE : 1)) continue;
       float m = p.surgeT > 0 ? SURGE_MULT : 1;
       float dc = max(d, 30.0f);
       float s = K_ORB * p.pol * o.pol * m / (dc * dc);
+      if (magnetar) s = -1.3f * fabsf(s);         // everything comes to you
+      else if (o.gold) s = -0.7f * fabsf(s);      // gold is drawn to everyone
       oax += s * dx / d; oay += s * dy / d;
     }
     o.vx += oax * dt; o.vy += oay * dt;
@@ -403,6 +485,7 @@ static void step(float dt) {
     if (hypotf(p.x, p.y) <= arenaR) continue;
     p.alive = false;
     p.respawnT = RESPAWN_TIME;
+    p.fx = FX_NONE; p.fxT = 0;
     int killer = (p.lastHitBy >= 0 && gameTime - p.lastHitT < CREDIT_TIME &&
                   players[p.lastHitBy].used) ? p.lastHitBy : -1;
     if (killer >= 0) players[killer].score += KO_POINTS;
@@ -423,18 +506,24 @@ static void broadcastState() {
   for (int i = 0; i < MAX_SLOTS; i++) {
     Player &p = players[i];
     if (!p.used) continue;
-    n += snprintf(snap + n, sizeof(snap) - n, "%s[%d,%d,%d,%d,%d,%d,%d,%d,%d,\"%s\"]", first ? "" : ",",
+    n += snprintf(snap + n, sizeof(snap) - n, "%s[%d,%d,%d,%d,%d,%d,%d,%d,%d,\"%s\",%d,%d]", first ? "" : ",",
                   i, (int)p.x, (int)p.y, p.pol, p.score, p.alive, p.surgeT > 0,
-                  (int)(max(0.0f, p.surgeCd) * 10), p.bot, p.name);
+                  (int)(max(0.0f, p.surgeCd) * 10), p.bot, p.name, p.fx, (int)(max(0.0f, p.fxT) * 10));
     first = false;
   }
   n += snprintf(snap + n, sizeof(snap) - n, "],\"o\":[");
   bool firstOrb = true;
   for (int k = 0; k < orbCount; k++) {
     if (orbs[k].hideT > 0) continue;
-    n += snprintf(snap + n, sizeof(snap) - n, "%s[%d,%d,%d]", firstOrb ? "" : ",", (int)orbs[k].x, (int)orbs[k].y, orbs[k].pol);
+    n += snprintf(snap + n, sizeof(snap) - n, "%s[%d,%d,%d]", firstOrb ? "" : ",", (int)orbs[k].x, (int)orbs[k].y,
+                  orbs[k].gold ? 2 : orbs[k].pol);   // 2 = golden
     firstOrb = false;
   }
+  if (powerup.type != FX_NONE)
+    n += snprintf(snap + n, sizeof(snap) - n, "],\"u\":[%d,%d,%d,%d", powerup.type, (int)powerup.x, (int)powerup.y,
+                  (int)(powerup.t * 10));
+  else
+    n += snprintf(snap + n, sizeof(snap) - n, "],\"u\":[");
   n += snprintf(snap + n, sizeof(snap) - n, "],\"e\":[");
   for (int e = 0; e < eventCount; e++)
     n += snprintf(snap + n, sizeof(snap) - n, "%s[%d,%d,%d]", e ? "," : "", events[e][0], events[e][1], events[e][2]);
