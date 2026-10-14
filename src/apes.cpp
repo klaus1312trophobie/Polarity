@@ -23,7 +23,7 @@ static const int   APE_R = 22, APE_DY = 24;         // hit radius, body centre a
 static const float CRATER = 30, CRATER_MEGA = 58;
 static const int   CRATE_R = 28;
 static const int   MAXPTS = 170, MAXSTEPS = 500;    // path points (every 3rd step), 60 Hz steps
-static const uint32_t TURN_MS = 30000, OVER_MS = 9000;
+static const uint32_t TURN_MS = 15000, OVER_MS = 9000;
 
 enum Phase { P_WAIT, P_AIM, P_FLY, P_OVER };
 enum Pu { PU_NONE, PU_MEGA, PU_TRIPLE, PU_BOUNCE, PU_NOWIND, PU_HEAL, PU_SWAP, PU_SHIELD, PU_CONSTIP, PU_COUNT };
@@ -48,6 +48,9 @@ static uint16_t hh[NC];                  // terrain height per column (y up from
 static Shot shots[3];
 static int phase = P_WAIT, turn = 0, wind = 0, winner = -1;
 static uint32_t turnEnd, animEnd, overEnd, botAt;
+struct Waiter { uint8_t client; char name[14]; };
+static Waiter queue[6];
+static int qn = 0;
 static char buf[6400];
 static char logLine[5][110];
 static int logN = 0;
@@ -127,7 +130,7 @@ static void spawnCrates() {
 // One throw. Records every 3rd step, stops at the first impact or when it leaves the world.
 static void simShot(Shot &s, int by, float ang, float pw, bool bounce, float wnd, bool rec) {
   const float dt = 1.0f / 60;
-  float dir = by == 0 ? 1 : -1, rad = ang * 0.0174533f, v = pw / 100.0f * VMAX;
+  float dir = seat[by].x < seat[1 - by].x ? 1 : -1, rad = ang * 0.0174533f, v = pw / 100.0f * VMAX;
   float x = seat[by].x + dir * 18, y = seat[by].y + 52;
   float vx = dir * v * cosf(rad), vy = v * sinf(rad);
   bool bounced = false;
@@ -236,6 +239,19 @@ static void awardPu(int by) {
   say("%s sammelt eine Kiste: %s! %s", me.name, PU_NAME[p], PU_DESC[p]);
 }
 
+// the ape that got hit scrambles forward or backward, but stays on its own side of the wall
+static void scramble(int a) {
+  bool left = seat[a].x < W / 2;
+  float lo = left ? 30 : 440, hi = left ? 360 : 770;
+  float dx = (rndi(0, 1) ? 1 : -1) * rndi(45, 95);
+  float nx = seat[a].x + dx;
+  if (nx < lo || nx > hi) nx = seat[a].x - dx;
+  nx = constrain(nx, lo, hi);
+  bool fwd = (nx - seat[a].x) * (left ? 1 : -1) > 0;
+  seat[a].x = nx;
+  say(fwd ? "%s hechtet nach vorne, mitten in den Gestank." : "%s flüchtet nach hinten. Feigling.", seat[a].name);
+}
+
 static void doThrow(int by, float ang, float pw, bool blind) {
   Seat &me = seat[by];
   int en = 1 - by;
@@ -292,6 +308,7 @@ static void doThrow(int by, float ang, float pw, bool blind) {
   if (dmg[en] > 0 && by != en) say(dmg[en] >= 30 ? pick(HIT) : pick(SPLASH), me.name, seat[en].name, dmg[en]);
   if (dmg[by] > 0) say(pick(SELF), me.name, dmg[by]);
   if (!dmg[0] && !dmg[1]) say(pick(MISS), me.name);
+  if (dmg[en] > 0 && by != en && seat[en].hp > 0) { scramble(en); ground(); }
 
   for (int k = 0; k < 2; k++)
     if ((got & (1 << k)) && crate[k].on) { crate[k].on = false; awardPu(by); }
@@ -340,17 +357,41 @@ static void setBot(int i) {
   strcpy(seat[i].name, i ? "Affe 2.0" : "Gorilla-KI");
 }
 
+static void sendYou(uint8_t num, int s, int q) {
+  char m[40]; int n = snprintf(m, sizeof(m), "{\"k\":\"you\",\"i\":%d,\"q\":%d}", s, q);
+  ws2.sendTXT(num, m, n);
+}
+static void notifyQueue() { for (int k = 0; k < qn; k++) sendYou(queue[k].client, -1, k + 1); }
+static int queueIndex(uint8_t num) { for (int k = 0; k < qn; k++) if (queue[k].client == num) return k; return -1; }
+static void enqueue(uint8_t num, const char *name) {
+  if (qn >= 6 || queueIndex(num) >= 0) return;
+  queue[qn].client = num; strncpy(queue[qn].name, name, 13); queue[qn].name[13] = 0; qn++;
+}
+static void dequeueAt(int k) { for (; k < qn - 1; k++) queue[k] = queue[k + 1]; qn--; }
+
+// first in line takes seat s (the previous human, if any, goes to the back of the queue)
+static void promote(int s) {
+  if (qn == 0) return;
+  Waiter w = queue[0]; dequeueAt(0);
+  if (seat[s].human) { uint8_t old = seat[s].client; char nm[14]; strcpy(nm, seat[s].name); enqueue(old, nm); }
+  seat[s].human = true; seat[s].client = w.client; strcpy(seat[s].name, w.name);
+  sendYou(w.client, s, 0);
+}
+
 static void onWs(uint8_t num, WStype_t type, uint8_t *payload, size_t len) {
   if (type == WStype_CONNECTED) {
     if (phase != P_WAIT) { int n = buildState(); ws2.sendTXT(num, buf, n); }
     return;
   }
   if (type == WStype_DISCONNECTED) {
+    int q = queueIndex(num);
+    if (q >= 0) { dequeueAt(q); notifyQueue(); }
     int i = seatOf(num);
     if (i < 0) return;
     setBot(i);
-    if (seat[1 - i].human) startMatch();       // the one left plays against the bot
-    else { phase = P_WAIT; }
+    if (qn > 0) { promote(i); notifyQueue(); }  // next in line jumps in
+    if (seat[0].human || seat[1].human) startMatch();   // whoever is left plays (against the bot if alone)
+    else phase = P_WAIT;
     return;
   }
   if (type != WStype_TEXT || len == 0) return;
@@ -366,9 +407,14 @@ static void onWs(uint8_t num, WStype_t type, uint8_t *payload, size_t len) {
     name[n] = 0;
     if (n == 0) strcpy(name, "Affe");
     int s = !seat[0].human ? 0 : (!seat[1].human ? 1 : -1);
-    char msg[24]; snprintf(msg, sizeof(msg), "{\"k\":\"you\",\"i\":%d}", s);
-    ws2.sendTXT(num, msg);
-    if (s < 0) { int m = buildState(); ws2.sendTXT(num, buf, m); return; }   // full: spectator
+    if (s < 0) {                               // both seats taken: watch, and challenge the loser afterwards
+      if (queueIndex(num) < 0) enqueue(num, name);
+      int q = queueIndex(num);
+      sendYou(num, -1, q < 0 ? 0 : q + 1);
+      int m = buildState(); ws2.sendTXT(num, buf, m);
+      return;
+    }
+    sendYou(num, s, 0);
     seat[s].human = true; seat[s].client = num; strcpy(seat[s].name, name);
     if (!seat[1 - s].human) setBot(1 - s);
     startMatch();
@@ -405,8 +451,18 @@ void apesLoop() {
   } else if (phase == P_FLY) {
     if (now >= animEnd) endFly();
   } else if (phase == P_OVER) {
-    if (now >= overEnd) startMatch();
+    if (now >= overEnd) {
+      if (qn > 0) {                              // challenger replaces the loser
+        int loser = winner == 2 ? rndi(0, 1) : 1 - winner;
+        promote(loser);
+        notifyQueue();
+        if (!seat[1 - loser].human) setBot(1 - loser);
+      }
+      startMatch();
+    }
   }
 }
 
 const char *apesPage() { return APES_PAGE; }
+int apesHumans() { return seat[0].human + seat[1].human; }
+int apesQueue() { return qn; }

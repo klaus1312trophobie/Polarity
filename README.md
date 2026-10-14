@@ -15,6 +15,13 @@ Every player is a magnet. Equal polarities repel, opposite ones attract, and tha
 
 Controls: WASD / arrow keys to move, Space to flip, Shift to surge. On phones, steer with your left thumb and use the buttons on the right.
 
+## Games
+
+`http://polarity.local/` is a game menu (also the captive-portal landing page).
+
+- **POLARITY** at `/polarity` (WebSocket :81), see above.
+- **AFFENSCHLACHT** at `/apes` (WebSocket :82): turn-based, two apes throw poop over a wall. Wind, craters, power-up crates, 15 s per turn, the hit ape scrambles forward or back. One human plays against a bot; with two seats taken, further visitors watch and queue. After each round the first in line replaces the loser (the loser goes to the back of the queue).
+
 ## Playing
 
 - **At home:** open `http://polarity.local` on any device in the same WiFi.

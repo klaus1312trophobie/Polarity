@@ -20,6 +20,7 @@
 #include "config.h"
 #include "webpage.h"
 #include "apes.h"
+#include "menu_page.h"
 
 // ---------------------------------------------------------------- tuning ---
 static const float ARENA_R        = 400;   // arena radius at round start
@@ -693,12 +694,13 @@ void setup() {
   ArduinoOTA.setPassword(OTA_PASSWORD);
   ArduinoOTA.begin();
 
-  http.on("/", [] { http.send_P(200, "text/html", PAGE); });
+  http.on("/", [] { http.send_P(200, "text/html", MENU_PAGE); });
+  http.on("/polarity", [] { http.send_P(200, "text/html", PAGE); });
   http.on("/apes", [] { http.send_P(200, "text/html", apesPage()); });
   http.on("/health", [] {
-    char b[96];
-    snprintf(b, sizeof(b), "{\"players\":%d,\"humans\":%d,\"heap\":%u,\"uptime\":%lu}",
-             playerCount(), humanCount(), ESP.getFreeHeap(), millis() / 1000);
+    char b[160];
+    snprintf(b, sizeof(b), "{\"players\":%d,\"humans\":%d,\"heap\":%u,\"uptime\":%lu,\"apes\":{\"humans\":%d,\"queue\":%d}}",
+             playerCount(), humanCount(), ESP.getFreeHeap(), millis() / 1000, apesHumans(), apesQueue());
     http.send(200, "application/json", b);
   });
   // unknown paths (incl. phones' connectivity checks in hotspot mode) land on the game

@@ -51,7 +51,7 @@ const char APES_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
     <div id="taunts"><button data-t="0">💨 Furz</button><button data-t="1">🙈 Uuh-Uuh!</button><button data-t="2">👅 Bäh</button></div>
   </div>
   <div id="log"></div>
-  <div id="foot"><span>Tasten: ↑↓ Winkel · ←→ Kraft · Leertaste wirft</span><a href="/">⬅ zu POLARITY</a></div>
+  <div id="foot"><span>Tasten: ↑↓ Winkel · ←→ Kraft · Leertaste wirft</span><a href="/">⬅ Spielauswahl</a></div>
 </div>
 <div id="ov"><div class="card">
   <h2>🐒 AFFENSCHLACHT</h2>
@@ -69,7 +69,7 @@ const PUI=['','💥','💩💩💩','🏀','💨','🍌','🔀','🧻','🤢'];
 const NAMES=['Bananen-Bernd','Kack-Kevin','Stinky Steve','Mist-Max','Affen-Alfred','Furz-Frank','Gorilla-Gisela','Lecker-Lutz'];
 const FLAVOR=['%s kratzt sich am Hintern und denkt nach…','%s wühlt in der Munition…','%s flucht auf Affisch…','%s übt noch kurz den Wurfarm…'];
 const WORDS=['PLATSCH!','FLATSCH!','SPLAT!','PFFFT!','BLÖRP!','MATSCH!'];
-let ws,me=-1,S=null,HH=new Int16Array(NC),joined=null,anim=null,parts=[],pops=[],bubbles=[],bq=[],bqEnd=0;
+let dx=[0,0],dy=[0,0],flashKey='',flash=null,ws,me=-2,myQ=0,S=null,HH=new Int16Array(NC),joined=null,anim=null,parts=[],pops=[],bubbles=[],bq=[],bqEnd=0;
 let ang=50,pow=65,rx=0,thrown=false,hurt=[0,0],lastHp=[100,100],aim=[40,40],flavor=0,muted=false,shake=0,AC=null,lastTurnKey='';
 
 // ------------------------------------------------------------- network ---
@@ -80,9 +80,14 @@ function connect(){
   ws.onmessage=e=>handle(JSON.parse(e.data));
 }
 function handle(m){
-  if(m.k==='you'){me=m.i;$('ov').style.display='none';if(me<0)addLog('Alles besetzt – du schaust zu.');}
+  if(m.k==='you'){const was=me;me=m.i;myQ=m.q||0;$('ov').style.display='none';
+    if(me<0&&myQ&&was!==-1)addLog('Alles besetzt – du schaust zu und löst nach der Runde den Verlierer ab.');
+    else if(me>=0&&was<0&&was!==-2)addLog('Du bist dran! Der Verlierer hat Platz gemacht.');
+    ui();}
   else if(m.k==='st'){
-    S=m;rx=performance.now();thrown=false;HH=Int16Array.from(m.h);
+    const first=!S||m.log.some(l=>l.startsWith('Neue Runde'));S=m;rx=performance.now();thrown=false;HH=Int16Array.from(m.h);
+    if(first)for(let i=0;i<2;i++){dx[i]=m.x[i];dy[i]=m.y[i];}
+    const fk=m.ph+':'+m.turn+':'+m.wind;if(m.ph===1&&fk!==flashKey)flash={t:m.turn===me?'DEIN ZUG!':m.n[m.turn]+' ist dran',until:performance.now()+1400,me:m.turn===me};flashKey=fk;
     for(let i=0;i<2;i++){if(m.hp[i]<lastHp[i])hurt[i]=performance.now()+1300;lastHp[i]=m.hp[i];}
     flavor=Math.floor(Math.random()*FLAVOR.length);
     m.log.forEach(addLog);
@@ -116,7 +121,7 @@ function ui(){
   let s='';
   if(!S)s='Warte auf Affen…';
   else if(S.ph===3)s=S.win===2?'Unentschieden – ihr stinkt beide.':S.n[S.win]+' gewinnt!';
-  else if(me<0)s='Du schaust zu.';
+  else if(me<0)s=myQ?'Zuschauer – Warteschlange Platz '+myQ+': du löst den Verlierer ab.':'Du schaust zu.';
   else if(S.turn===me)s='DEIN ZUG!'+(S.t?' Noch '+Math.max(0,Math.round(S.t-(performance.now()-rx)/1000))+'s':'');
   else s=FLAVOR[flavor].replace('%s',S.n[S.turn]);
   $('status').textContent=s;
@@ -199,8 +204,9 @@ function poop(x,y,s,r,stink){
   g.fillStyle='#000';g.beginPath();g.arc(-2.6,.4,1,0,7);g.arc(3.4,.4,1,0,7);g.fill();
   g.restore();
 }
+const face=i=>S.x[i]<S.x[1-i]?1:-1;
 function drawApe(i,t,now){
-  const x=S.x[i],fy=wy(S.y[i]),d=i?-1:1,dead=S.hp[i]<=0,ouch=now<hurt[i];
+  const x=dx[i],fy=wy(dy[i])-(Math.abs(S.x[i]-dx[i])>2?Math.abs(Math.sin(now/70))*7:0),d=face(i),dead=S.hp[i]<=0,ouch=now<hurt[i];
   const bob=dead?0:Math.sin(t/260+i*2)*1.6;
   const fur=i?'#a8541f':'#5b3a1e',light='#e0b185';
   g.save();g.translate(x,fy);
@@ -287,6 +293,8 @@ function hud(now){
     if(chips.length){g.font='bold 11px Trebuchet MS,sans-serif';g.textAlign=i?'right':'left';g.fillStyle='#ffe27a';g.strokeStyle='#000';g.lineWidth=3;
       const tx=i?x+200:x;g.strokeText(chips.join(' · '),tx,58);g.fillText(chips.join(' · '),tx,58);g.font='bold 13px Trebuchet MS,sans-serif';}
   }
+  if(S.t>0&&S.ph===1){const left=Math.max(0,S.t-(now-rx)/1000),f=Math.min(1,left/15);
+    g.fillStyle='#000a';g.fillRect(W/2-60,46,120,8);g.fillStyle=f>.4?'#ffb02e':'#ff4a3a';g.fillRect(W/2-58,48,116*f,4);}
   // wind
   const w=S.wind;g.fillStyle='#000a';g.fillRect(W/2-60,8,120,36);g.fillStyle='#fff';g.textAlign='center';g.fillText('WIND '+Math.abs(w)+(w<0?' ◀':w>0?' ▶':''),W/2,22);
   g.strokeStyle='#8fe3ff';g.lineWidth=2;const off=(now/60*Math.sign(w))%12;
@@ -298,14 +306,23 @@ function draw(now){
   g.save();
   if(shake>.5){g.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);shake*=.88;}
   scene(t,now);
+  if(S)for(let i=0;i<2;i++){dx[i]+=(S.x[i]-dx[i])*Math.min(1,dt*6);dy[i]+=(S.y[i]-dy[i])*Math.min(1,dt*8);}
   if(!S){g.fillStyle='#fff';g.font='bold 22px sans-serif';g.textAlign='center';g.fillText('Die Affen ziehen sich noch an…',W/2,H/2);g.restore();return;}
   S.cr.forEach(c=>{if(c[0]>=0)crateAt(c[0],c[1],t);});
   for(let i=0;i<2;i++)drawApe(i,t,now);
   // preview stub of my throw
   if(me>=0&&S.ph===1&&S.turn===me&&!thrown&&!anim){
-    const d=me?-1:1,r=ang*Math.PI/180,v=pow/100*700;let x=S.x[me]+d*18,y=S.y[me]+52,vx=d*v*Math.cos(r),vy=v*Math.sin(r);
+    const d=face(me),r=ang*Math.PI/180,v=pow/100*700;let x=S.x[me]+d*18,y=S.y[me]+52,vx=d*v*Math.cos(r),vy=v*Math.sin(r);
+    const L=34+pow*.8,ox=S.x[me]+d*18,oy=wy(S.y[me]+52),ex=ox+d*Math.cos(r)*L,ey=oy-Math.sin(r)*L;
+    g.strokeStyle='#ffe27a';g.fillStyle='#ffe27a';g.lineWidth=4;g.lineCap='round';g.setLineDash([9,6]);
+    g.beginPath();g.moveTo(ox,oy);g.lineTo(ex,ey);g.stroke();g.setLineDash([]);
+    const ah=Math.atan2(ey-oy,ex-ox);g.beginPath();g.moveTo(ex+Math.cos(ah)*10,ey+Math.sin(ah)*10);
+    g.lineTo(ex+Math.cos(ah+2.5)*12,ey+Math.sin(ah+2.5)*12);g.lineTo(ex+Math.cos(ah-2.5)*12,ey+Math.sin(ah-2.5)*12);g.fill();
+    g.lineWidth=2;g.beginPath();g.arc(ox,oy,26,d>0?-r:Math.PI,d>0?0:Math.PI+r);g.stroke();
+    g.font='bold 13px sans-serif';g.textAlign='center';g.strokeStyle='#000';g.lineWidth=3;
+    g.strokeText(ang+'° · '+pow+'%',ex,ey-14);g.fillText(ang+'° · '+pow+'%',ex,ey-14);
     g.fillStyle='#fff9';
-    for(let s=0;s<30;s++){vx+=S.wind/60;vy-=450/60;x+=vx/60;y+=vy/60;if(s%3===2){g.beginPath();g.arc(x,wy(y),2.2,0,7);g.fill();}}
+    for(let s=0;s<45;s++){vx+=S.wind/60;vy-=450/60;x+=vx/60;y+=vy/60;if(s%3===2){g.beginPath();g.arc(x,wy(y),2.2,0,7);g.fill();}}
   }
   // flying poop
   if(anim){
@@ -323,7 +340,7 @@ function draw(now){
   pops.forEach(p=>{const u=1-(p.until-now)/900;g.font='bold '+p.s+'px Impact,sans-serif';g.textAlign='center';g.fillStyle='#ffe14d';g.strokeStyle='#6b1d0a';g.lineWidth=4;g.strokeText(p.t,p.x,p.y-u*40);g.fillText(p.t,p.x,p.y-u*40);});
   // speech bubbles
   bubbles=bubbles.filter(b=>now<b.until);
-  bubbles.forEach(b=>{const x=S.x[b.i],y=wy(S.y[b.i])-112;g.font='bold 13px sans-serif';const tw=g.measureText(b.t).width+16;
+  bubbles.forEach(b=>{const x=dx[b.i],y=wy(dy[b.i])-112;g.font='bold 13px sans-serif';const tw=g.measureText(b.t).width+16;
     g.fillStyle='#fff';g.beginPath();g.roundRect(x-tw/2,y-22,tw,24,8);g.fill();g.beginPath();g.moveTo(x-5,y+2);g.lineTo(x,y+10);g.lineTo(x+5,y+2);g.fill();
     g.fillStyle='#000';g.textAlign='center';g.fillText(b.t,x,y-5);});
   hud(now);
@@ -331,6 +348,8 @@ function draw(now){
   const cur=bq.find(b=>now>=b.s&&now<b.s+2800);bq=bq.filter(b=>now<b.s+2800);
   if(cur){g.font='bold 15px Trebuchet MS,sans-serif';const tw=Math.min(W-20,g.measureText(cur.t).width+24);
     g.fillStyle='#000b';g.beginPath();g.roundRect(W/2-tw/2,H-44,tw,30,10);g.fill();g.fillStyle='#ffe27a';g.textAlign='center';g.fillText(cur.t,W/2,H-24,tw-12);}
+  if(flash&&now<flash.until){g.font='bold 54px Impact,sans-serif';g.textAlign='center';g.globalAlpha=Math.min(1,(flash.until-now)/400);
+    g.fillStyle=flash.me?'#ffe14d':'#fff';g.strokeStyle='#6b1d0a';g.lineWidth=7;g.strokeText(flash.t,W/2,190);g.fillText(flash.t,W/2,190);g.globalAlpha=1;}
   if(S.ph===3){g.font='bold 44px Impact,sans-serif';g.textAlign='center';g.fillStyle='#ffe14d';g.strokeStyle='#6b1d0a';g.lineWidth=6;
     const tx=S.win===2?'UNENTSCHIEDEN!':S.n[S.win]+' GEWINNT!';g.strokeText(tx,W/2,150);g.fillText(tx,W/2,150);}
   g.restore();

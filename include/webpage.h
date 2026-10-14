@@ -81,7 +81,7 @@ const char PAGE[] PROGMEM = R"rawliteral(<!doctype html>
     On a phone: left thumb steers, buttons on the right.
   </div>
   <div class="best" id="best"></div>
-  <div class="best"><a href="/apes" style="color:#ffd23f">🐒 Neu: AFFENSCHLACHT (Affen, Kacke, Mauer)</a></div>
+  <div class="best"><a href="/" style="color:#ffd23f">⬅ Spielauswahl</a></div>
 </div></div>
 
 <script>

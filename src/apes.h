@@ -3,3 +3,5 @@
 void apesBegin();               // start the WebSocket server (port 82)
 void apesLoop();                // call every loop()
 const char *apesPage();         // the HTML client (served at /apes)
+int apesHumans();                // seated human players (0..2)
+int apesQueue();                 // spectators waiting for a seat
