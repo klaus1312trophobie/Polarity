@@ -19,6 +19,7 @@
 #include <Preferences.h>
 #include "config.h"
 #include "webpage.h"
+#include "apes.h"
 
 // ---------------------------------------------------------------- tuning ---
 static const float ARENA_R        = 400;   // arena radius at round start
@@ -693,6 +694,7 @@ void setup() {
   ArduinoOTA.begin();
 
   http.on("/", [] { http.send_P(200, "text/html", PAGE); });
+  http.on("/apes", [] { http.send_P(200, "text/html", apesPage()); });
   http.on("/health", [] {
     char b[96];
     snprintf(b, sizeof(b), "{\"players\":%d,\"humans\":%d,\"heap\":%u,\"uptime\":%lu}",
@@ -706,6 +708,7 @@ void setup() {
   });
   http.begin();
 
+  apesBegin();
   ws.begin();
   ws.onEvent(onWs);
   ws.enableHeartbeat(3000, 2000, 2);   // drop dead tabs quickly
@@ -717,6 +720,7 @@ void loop() {
   if (hotspot) handleDns();
   http.handleClient();
   ws.loop();
+  apesLoop();
 
   uint32_t now = millis();
   int steps = 0;
