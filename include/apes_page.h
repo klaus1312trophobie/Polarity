@@ -48,14 +48,14 @@ const char APES_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
     <label>Winkel<input id="a" type="range" min="2" max="88" value="50"><b id="av">50°</b></label>
     <label>Kraft<input id="p" type="range" min="5" max="100" value="65"><b id="pv">65%</b></label>
     <button id="fire" disabled>💩 WERFEN!</button>
-    <div id="taunts"><button data-t="0">💨 Furz</button><button data-t="1">🙈 Uuh-Uuh!</button><button data-t="2">👅 Bäh</button></div>
+    <div id="taunts"><button data-t="0">💨 Arschtrompete</button><button data-t="1">🍆 Schwanzvergleich</button><button data-t="2">🖕 Leck mich</button></div>
   </div>
   <div id="log"></div>
   <div id="foot"><span>Tasten: ↑↓ Winkel · ←→ Kraft · Leertaste wirft</span><a href="/">⬅ Spielauswahl</a></div>
 </div>
 <div id="ov"><div class="card">
   <h2>🐒 AFFENSCHLACHT</h2>
-  <p>Zwei Affen. Eine Mauer. Kein Klopapier.<br>Stell Winkel und Kraft ein und wirf deine Kacke über die Mauer. Kisten im Flug liefern Power-Ups. Wer null Leben hat, stinkt ab.</p>
+  <p>Zwei notgeile Affen. Eine Mauer. Kein Klopapier.<br>Stell Winkel und Kraft ein und wirf deine Scheiße über die Mauer. Kisten liefern Power-Ups. Wer null Leben hat, kann sich die Kugel geben. Ab 18, wegen Kacke.</p>
   <input type="text" id="nm" maxlength="12" autocomplete="off">
   <button id="go">MITSPIELEN</button>
   <p style="font-size:12px">Allein? Dann spielt die Gorilla-KI mit. Zu zweit: einfach zweites Handy öffnen.</p>
@@ -66,9 +66,9 @@ const W=800,H=450,CW=4,NC=200,WA=96,WB=103;
 const $=id=>document.getElementById(id), cv=$('cv'), g=cv.getContext('2d');
 const PU=['','Mega-Haufen','Dünnschiss-Salve','Gummi-Kacke','Furz-Antrieb','Heilbanane','Platztausch','Klopapier-Schild','Verstopfung'];
 const PUI=['','💥','💩💩💩','🏀','💨','🍌','🔀','🧻','🤢'];
-const NAMES=['Bananen-Bernd','Kack-Kevin','Stinky Steve','Mist-Max','Affen-Alfred','Furz-Frank','Gorilla-Gisela','Lecker-Lutz'];
-const FLAVOR=['%s kratzt sich am Hintern und denkt nach…','%s wühlt in der Munition…','%s flucht auf Affisch…','%s übt noch kurz den Wurfarm…'];
-const WORDS=['PLATSCH!','FLATSCH!','SPLAT!','PFFFT!','BLÖRP!','MATSCH!'];
+const NAMES=['Bananen-Bernd','Kack-Kevin','Sack-Steve','Arsch-Axel','Affen-Alfred','Furz-Frank','Gorilla-Gisela','Eier-Erwin','Schwanz-Siggi','Pimmel-Paul'];
+const FLAVOR=['%s kratzt sich am Sack und denkt nach…','%s wühlt sich im Arsch nach Munition…','%s drückt noch eine Ladung raus…','%s spielt kurz an sich rum und zielt dann…','%s flucht wie ein Bierkutscher…'];
+const WORDS=['PLATSCH!','FLATSCH!','SCHEISSE!','PFFFT!','BLÖRP!','ARSCH!','SPRITZ!'];
 let dx=[0,0],dy=[0,0],flashKey='',flash=null,ws,me=-2,myQ=0,S=null,HH=new Int16Array(NC),joined=null,anim=null,parts=[],pops=[],bubbles=[],bq=[],bqEnd=0;
 let ang=50,pow=65,rx=0,thrown=false,hurt=[0,0],lastHp=[100,100],aim=[40,40],flavor=0,muted=false,shake=0,AC=null,lastTurnKey='';
 
@@ -81,7 +81,7 @@ function connect(){
 }
 function handle(m){
   if(m.k==='you'){const was=me;me=m.i;myQ=m.q||0;$('ov').style.display='none';
-    if(me<0&&myQ&&was!==-1)addLog('Alles besetzt – du schaust zu und löst nach der Runde den Verlierer ab.');
+    if(me<0&&myQ&&was!==-1)addLog('Alles besetzt – du schaust zu und löst nach der Runde die Pfeife ab.');
     else if(me>=0&&was<0&&was!==-2)addLog('Du bist dran! Der Verlierer hat Platz gemacht.');
     ui();}
   else if(m.k==='st'){
@@ -102,7 +102,7 @@ function handle(m){
     whoosh();
   }
   else if(m.k==='taunt'){
-    const t=['*PFFFRRRT*','UUH UUH AAH AAH!','Bäääääh!'][m.n];
+    const t=['*ARSCHTROMPETE*','UUH UUH, ICH FICK DEINE BANANE!','Leck mich am Sack!'][m.n];
     bubbles.push({i:m.by,t,until:performance.now()+1800});[fart,monkey,raspberry][m.n]();
   }
 }

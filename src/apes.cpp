@@ -30,10 +30,11 @@ enum Pu { PU_NONE, PU_MEGA, PU_TRIPLE, PU_BOUNCE, PU_NOWIND, PU_HEAL, PU_SWAP, P
 
 static const char *PU_NAME[] = {"", "Mega-Haufen", "Dünnschiss-Salve", "Gummi-Kacke", "Furz-Antrieb",
                                 "Heilbanane", "Platztausch", "Klopapier-Schild", "Verstopfung"};
-static const char *PU_DESC[] = {"", "Riesenkrater, mehr Schaden.", "Drei Kacken auf einmal.", "Prallt einmal ab.",
-                                "Wind? Interessiert den Furz nicht.", "+35 Leben, schmeckt nach Rettung.",
-                                "Beide Affen tauschen die Plätze.", "Der nächste Treffer wird halbiert.",
-                                "Der Gegner kann nur noch mit halber Kraft werfen."};
+static const char *PU_DESC[] = {"", "Ein Haufen so groß wie dein Ego. Riesenkrater.",
+                                "Drei Ladungen auf einmal. Der Darm kennt keine Gnade.", "Prallt ab wie die Frauen bei dir.",
+                                "Der Wind kann dich mal am Arsch lecken.", "Schälen, essen, +35 Leben. Du Ferkel.",
+                                "Ihr tauscht die Ärsche, äh Plätze.", "Der nächste Treffer wird halbiert. Wie bei deinem Schwanz.",
+                                "Der Gegner kann nur noch mit halber Kraft pressen."};
 
 struct Seat {
   bool human; uint8_t client; char name[14];
@@ -70,23 +71,33 @@ template <size_t N> static const char *pick(const char *(&a)[N]) { return a[esp_
 
 // args: thrower, victim, damage
 static const char *HIT[] = {
-  "%s trifft %s voll ins Gesicht. Ein Schrei, ein Gestank: -%d",
-  "Volltreffer! %s hat %s mit frischer Ware erwischt (-%d)",
-  "%s tauft %s im Haufen-Becken. -%d",
-  "Das war kein Bananensplit! %s nagelt %s: -%d",
-  "%s serviert %s ein warmes Geschenk. -%d"};
+  "%s klatscht %s einen warmen Haufen mitten auf die Fresse. -%d",
+  "Volltreffer! %s hat %s die Kacke direkt in den Arsch gedrückt. -%d",
+  "%s zielt auf %ss Eier und trifft. Das tut selbst beim Zuschauen weh. -%d",
+  "%s verpasst %s eine Gesichtsbesamung mit Dünnschiss. Widerlich. -%d",
+  "%s hat %s ein Geschenk gemacht, und es war KEIN Gutschein. -%d",
+  "%s schmiert %s die Scheiße in alle Körperöffnungen. -%d",
+  "Das war kein Bananensplit! %s nagelt %s mit einer Ladung Kot. -%d",
+  "%s trifft %s so hart, dass der sich das Frühstück zweimal ansehen darf. -%d"};
 static const char *SPLASH[] = {
-  "%s streift %s nur. Immerhin, es stinkt. -%d",
-  "Spritzer! %s sprenkelt %s ein bisschen an. -%d",
-  "%s trifft %s mit den Resten. Eklig, aber nicht tödlich. -%d"};
+  "%s spritzt %s nur ein bisschen an. Wie beim Pissen im Wind. -%d",
+  "Streifschuss! %s hat %s den Schwanz angekackt, mehr nicht. -%d",
+  "%s trifft %s mit den Spritzern. Das riecht nach Montagmorgen. -%d",
+  "%s hat %s halb getroffen. Wie dein Sexleben: knapp daneben. -%d",
+  "Ein Spritzer von %s landet in %ss Mund. Schmeckt nach Sieg. -%d"};
 static const char *MISS[] = {
-  "%s wirft daneben. Die Kacke landet im Nirgendwo.",
-  "%s verfehlt alles. Die Mauer lacht.",
-  "Platsch! %s hat nur den Boden gedüngt.",
-  "%s zielt wie ein Weltmeister, trifft wie ein Affe."};
+  "%s wirft daneben. Die Kacke landet im Nirgendwo, wie deine Karriere.",
+  "%s verfehlt alles. Die Mauer lacht sich tot.",
+  "Platsch! %s hat nur den Boden gedüngt. Immerhin was Sinnvolles.",
+  "%s zielt wie ein Weltmeister und trifft wie ein Sack Nüsse.",
+  "%s wirft so schlecht, dass sogar die Fliegen weggucken.",
+  "%s hat daneben geworfen. Bei dem Zielwasser überrascht das niemanden.",
+  "Kein Treffer. %s sollte lieber wieder an sich selbst rumspielen.",
+  "%s schmeißt die Scheiße in die Prärie. Sehr elegant."};
 static const char *SELF[] = {
-  "%s hat sich selbst getroffen. Evolution rückwärts. -%d",
-  "Eigentor! %s wirft sich die Kacke selbst ins Gesicht. -%d"};
+  "%s hat sich selbst getroffen. Eigenwichse mit Kot. -%d",
+  "Eigentor! %s wirft sich die Kacke in die eigene Fresse. -%d",
+  "%s hat sich selbst eingesaut. Das nennt man wohl Selbstbefriedigung. -%d"};
 
 // ---------------------------------------------------------------- world ---
 static void genTerrain() {
@@ -223,7 +234,7 @@ static void startMatch() {
   ground();
   winner = -1; turn = rndi(0, 1);
   logN = 0;
-  say("Neue Runde: %s gegen %s. Möge der Stinkendere gewinnen.", seat[0].name, seat[1].name);
+  say("Neue Runde: %s gegen %s. Möge der größere Wichser gewinnen.", seat[0].name, seat[1].name);
   startTurn();
   broadcastState();
 }
@@ -238,7 +249,7 @@ static void awardPu(int by) {
     case PU_CONSTIP: seat[1 - by].cap = true; break;
     default:         me.pu = p;
   }
-  say("%s sammelt eine Kiste: %s! %s", me.name, PU_NAME[p], PU_DESC[p]);
+  say("%s reißt die Kiste auf: %s! %s", me.name, PU_NAME[p], PU_DESC[p]);
 }
 
 // the ape that got hit scrambles forward or backward, but stays on its own side of the wall
@@ -251,7 +262,7 @@ static void scramble(int a) {
   nx = constrain(nx, lo, hi);
   bool fwd = (nx - seat[a].x) * (left ? 1 : -1) > 0;
   seat[a].x = nx;
-  say(fwd ? "%s hechtet nach vorne, mitten in den Gestank." : "%s flüchtet nach hinten. Feigling.", seat[a].name);
+  say(fwd ? "%s hechtet nach vorne, direkt in die Scheiße." : "%s kneift die Arschbacken zusammen und haut nach hinten ab.", seat[a].name);
 }
 
 static void doThrow(int by, float ang, float pw, bool blind) {
@@ -264,7 +275,7 @@ static void doThrow(int by, float ang, float pw, bool blind) {
   float R = kind == PU_MEGA ? CRATER_MEGA : CRATER;
   float base = kind == PU_MEGA ? 52 : (kind == PU_TRIPLE ? 27 : 38);
 
-  if (blind) say("%s hat zu lange nachgedacht und wirft blind.", me.name);
+  if (blind) say("%s hat zu lange am Sack gekratzt und wirft blind.", me.name);
   int maxN = 0; uint8_t got = 0;
   for (int i = 0; i < cnt; i++) {
     float a = ang + (cnt == 3 ? (i - 1) * 6.0f : 0), p = pw * (cnt == 3 ? 1.0f + (i - 1) * 0.04f : 1.0f);
@@ -307,7 +318,7 @@ static void doThrow(int by, float ang, float pw, bool blind) {
   for (int a = 0; a < 2; a++) {
     if (dmg[a] > 0 && seat[a].shield) {
       dmg[a] = (dmg[a] + 1) / 2; seat[a].shield = false;
-      say("%ss Klopapier-Schild fängt die Hälfte ab.", seat[a].name);
+      say("%ss Klopapier fängt die Hälfte ab. Abwischen nicht vergessen.", seat[a].name);
     }
     seat[a].hp = max(0, seat[a].hp - dmg[a]);
   }
@@ -350,8 +361,8 @@ static void endFly() {
   if (d0 || d1) {
     phase = P_OVER; overEnd = millis() + OVER_MS;
     winner = (d0 && d1) ? 2 : (d0 ? 1 : 0);
-    if (winner == 2) say("Unentschieden: beide stinken gleich schlimm.");
-    else say("%s gewinnt! %s muss jetzt duschen.", seat[winner].name, seat[1 - winner].name);
+    if (winner == 2) say("Unentschieden: beide sind gleich beschissen.");
+    else say("%s gewinnt! %s kann sich jetzt den Arsch mit der Zahnbürste putzen.", seat[winner].name, seat[1 - winner].name);
   } else {
     turn = 1 - turn;
     startTurn();
