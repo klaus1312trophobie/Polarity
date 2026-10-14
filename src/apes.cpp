@@ -21,7 +21,7 @@ static const int   WALL_A = 96, WALL_B = 103;       // columns of the wall in th
 static const float GRAV = 450, VMAX = 700;          // px/s^2, px/s at 100 % power
 static const int   APE_R = 22, APE_DY = 24;         // hit radius, body centre above feet
 static const float CRATER = 30, CRATER_MEGA = 58;
-static const int   CRATE_R = 28;
+static const int   CRATE_R = 46;   // fly-through pickup radius (client draws the same ring)
 static const int   MAXPTS = 170, MAXSTEPS = 500;    // path points (every 3rd step), 60 Hz steps
 static const uint32_t TURN_MS = 15000, OVER_MS = 9000;
 
@@ -51,6 +51,8 @@ static uint32_t turnEnd, animEnd, overEnd, botAt;
 struct Waiter { uint8_t client; char name[14]; };
 static Waiter queue[6];
 static int qn = 0;
+static const int LED_PIN = 2;             // on-board LED: blinks 3x when an ape gets hit
+static uint32_t blinkAt = 0;
 static char buf[6400];
 static char logLine[5][110];
 static int logN = 0;
@@ -122,7 +124,7 @@ static void spawnCrates() {
     if (crate[k].on || rndi(0, 99) >= 60) continue;
     int x;
     do { x = rndi(130, 670); } while (x > 340 && x < 460);
-    crate[k].on = true; crate[k].x = x; crate[k].y = hh[colOf(x)] + rndi(60, 190);
+    crate[k].on = true; crate[k].x = x; crate[k].y = hh[colOf(x)] + rndi(50, 150);
   }
 }
 
@@ -286,6 +288,12 @@ static void doThrow(int by, float ang, float pw, bool blind) {
   n = put(n, "]}");
   ws2.broadcastTXT(buf, n);
 
+  // an impact close to a crate knocks it open as well
+  for (int i = 0; i < cnt; i++)
+    if (shots[i].impact)
+      for (int k = 0; k < 2; k++)
+        if (crate[k].on && hypotf(shots[i].ex - crate[k].x, shots[i].ey - crate[k].y) < R + 34) got |= 1 << k;
+
   // damage at the pre-crater positions
   int dmg[2] = {0, 0};
   for (int i = 0; i < cnt; i++) {
@@ -304,6 +312,11 @@ static void doThrow(int by, float ang, float pw, bool blind) {
     seat[a].hp = max(0, seat[a].hp - dmg[a]);
   }
   ground();
+  if (dmg[0] > 0 || dmg[1] > 0) {                         // blink when the poop lands, not when it leaves
+    int hitN = 0;
+    for (int i = 0; i < cnt; i++) if (shots[i].impact) hitN = max(hitN, shots[i].n);
+    blinkAt = millis() + hitN * 50;
+  }
 
   if (dmg[en] > 0 && by != en) say(dmg[en] >= 30 ? pick(HIT) : pick(SPLASH), me.name, seat[en].name, dmg[en]);
   if (dmg[by] > 0) say(pick(SELF), me.name, dmg[by]);
@@ -443,6 +456,11 @@ void apesBegin() {
 
 void apesLoop() {
   ws2.loop();
+  if (blinkAt) {
+    int32_t t = (int32_t)(millis() - blinkAt);
+    if (t >= 600) { digitalWrite(LED_PIN, LOW); blinkAt = 0; }
+    else if (t >= 0) digitalWrite(LED_PIN, (t / 100) % 2 == 0);
+  }
   if (phase == P_WAIT) return;
   uint32_t now = millis();
   if (phase == P_AIM) {

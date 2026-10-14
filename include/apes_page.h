@@ -244,6 +244,8 @@ function drawApe(i,t,now){
 }
 function crateAt(x,y,t){
   g.save();g.translate(x,wy(y)+Math.sin(t/400+x)*3);
+  g.strokeStyle='rgba(255,226,122,'+(.35+.25*Math.sin(t/250))+')';g.lineWidth=3;g.setLineDash([6,5]);g.beginPath();g.arc(0,0,46,0,7);g.stroke();g.setLineDash([]);
+  g.scale(1.35,1.35);
   g.fillStyle='#d99a3d';g.fillRect(-14,-14,28,28);g.strokeStyle='#7a4a12';g.lineWidth=2;g.strokeRect(-14,-14,28,28);
   g.beginPath();g.moveTo(-14,-14);g.lineTo(14,14);g.moveTo(14,-14);g.lineTo(-14,14);g.stroke();
   g.fillStyle='#fff';g.fillRect(-8,-9,16,18);g.fillStyle='#d6212a';g.font='bold 16px sans-serif';g.textAlign='center';g.fillText('?',0,6);
