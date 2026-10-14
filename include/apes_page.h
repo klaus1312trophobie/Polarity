@@ -10,20 +10,36 @@ const char APES_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:#1a0f07;color:var(--ink);font-family:"Trebuchet MS",Verdana,sans-serif;
     display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:8px 10px 20px;user-select:none;-webkit-user-select:none}
-  h1{font-size:clamp(22px,5vw,40px);letter-spacing:3px;color:var(--hot);text-shadow:3px 3px 0 #6b3f1d;margin:4px 0}
+  h1{text-align:center;font-size:clamp(22px,5vw,40px);letter-spacing:3px;color:var(--hot);text-shadow:3px 3px 0 #6b3f1d;margin:4px 0}
   h1 small{font-size:.4em;color:var(--dim);letter-spacing:1px;text-shadow:none;display:block;text-align:center}
   #wrap{width:100%;max-width:900px}
   canvas{width:100%;display:block;border:4px solid #6b3f1d;border-radius:12px;background:#000;touch-action:none}
-  #ctl{background:var(--card);border-radius:12px;padding:12px 14px;margin-top:10px;display:grid;gap:10px}
+  #ctl{background:var(--card);border-radius:12px;padding:12px 14px;margin-top:10px;display:grid;gap:12px;grid-template-columns:1fr}
+  #aimbox{display:grid;gap:10px;align-content:start}
   #status{font-weight:700;min-height:22px;color:var(--hot)}
   label{display:grid;grid-template-columns:76px 1fr 54px;align-items:center;gap:10px;font-size:15px}
   label b{text-align:right;color:var(--hot)}
-  input[type=range]{width:100%;height:30px;accent-color:#ff8a1f}
-  button{font:inherit;cursor:pointer;border:0;border-radius:10px;color:#2b1a0e;background:var(--hot);font-weight:700;padding:8px 12px}
+  input[type=range]{width:100%;height:36px;accent-color:#ff8a1f}
+  button{font:inherit;touch-action:manipulation;-webkit-tap-highlight-color:transparent;cursor:pointer;border:0;border-radius:10px;color:#2b1a0e;background:var(--hot);font-weight:700;padding:8px 12px}
   button:disabled{opacity:.35;cursor:default}
   #fire{font-size:24px;padding:14px;letter-spacing:2px;background:linear-gradient(#ffcf4d,#ff8a1f)}
-  #taunts{display:flex;gap:8px;flex-wrap:wrap}
-  #taunts button{flex:1;background:#6b3f1d;color:var(--ink);min-width:90px}
+  #taunts{display:grid;gap:8px;grid-template-columns:repeat(4,1fr)}
+  #taunts button{background:#6b3f1d;color:var(--ink);padding:8px 4px;min-height:62px;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:2px;font-size:12px;line-height:1.15;text-align:center;word-break:break-word;hyphens:auto;border:2px solid #8a5a2b}
+  #taunts button:active{background:#a8541f;transform:scale(.96)}
+  #taunts .e{font-size:24px;line-height:1}
+  @media(min-width:760px){#ctl{grid-template-columns:5fr 6fr}#status{grid-column:1/-1}}
+  @media(max-width:600px){
+    body{padding:6px 6px 18px}
+    #ctl{padding:10px}
+    #taunts{grid-template-columns:repeat(2,1fr)}
+    #taunts button{flex-direction:row;justify-content:flex-start;gap:8px;padding:8px 10px;font-size:13px;text-align:left;min-height:48px}
+    #taunts .e{font-size:22px}
+    label{grid-template-columns:58px 1fr 52px;gap:8px}
+    #fire{font-size:22px;padding:16px}
+    #log{font-size:12px}
+  }
+  @media(pointer:coarse){#kbd{display:none}}
   #log{margin-top:10px;font-size:13px;line-height:1.6;color:var(--dim);min-height:60px}
   #log div:first-child{color:var(--ink)}
   #foot{margin-top:10px;font-size:12px;color:var(--dim);display:flex;justify-content:space-between}
@@ -45,13 +61,15 @@ const char APES_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
   <div id="conn"></div>
   <div id="ctl">
     <div id="status">Verbinde…</div>
-    <label>Winkel<input id="a" type="range" min="2" max="88" value="50"><b id="av">50°</b></label>
-    <label>Kraft<input id="p" type="range" min="5" max="100" value="65"><b id="pv">65%</b></label>
-    <button id="fire" disabled>💩 WERFEN!</button>
-    <div id="taunts"><button data-t="0">💨 Arschtrompete</button><button data-t="1">🍆 Schwanzvergleich</button><button data-t="2">🖕 Leck mich</button></div>
+    <div id="aimbox">
+      <label>Winkel<input id="a" type="range" min="2" max="88" value="50"><b id="av">50°</b></label>
+      <label>Kraft<input id="p" type="range" min="5" max="100" value="65"><b id="pv">65%</b></label>
+      <button id="fire" disabled>💩 WERFEN!</button>
+    </div>
+    <div id="taunts"></div>
   </div>
   <div id="log"></div>
-  <div id="foot"><span>Tasten: ↑↓ Winkel · ←→ Kraft · Leertaste wirft</span><a href="/">⬅ Spielauswahl</a></div>
+  <div id="foot"><span id="kbd">Tasten: ↑↓ Winkel · ←→ Kraft · Leertaste wirft</span><a href="/">⬅ Spielauswahl</a></div>
 </div>
 <div id="ov"><div class="card">
   <h2>🐒 AFFENSCHLACHT</h2>
@@ -103,8 +121,8 @@ function handle(m){
     if(m.kind>0)pops.push({x:W/2,y:150,t:PU[m.kind].toUpperCase()+'!',until:performance.now()+1500,s:m.kind>=9?44:34});
   }
   else if(m.k==='taunt'){
-    const t=['*ARSCHTROMPETE*','UUH UUH, ICH FICK DEINE BANANE!','Leck mich am Sack!'][m.n];
-    bubbles.push({i:m.by,t,until:performance.now()+1800});[fart,monkey,raspberry][m.n]();
+    const T=TAUNTS[m.n]||TAUNTS[0];
+    bubbles.push({i:m.by,t:T.t,until:performance.now()+2200});T.s();
   }
 }
 function addLog(t){
@@ -134,7 +152,7 @@ function fire(){
   ws.send('t'+ang+','+pow);thrown=true;ui();
 }
 $('fire').onclick=fire;
-document.querySelectorAll('#taunts button').forEach(b=>b.onclick=()=>{audio();if(ws.readyState===1)ws.send('x'+b.dataset.t);});
+
 $('mute').onclick=()=>{muted=!muted;$('mute').textContent=muted?'🔇':'🔊';};
 addEventListener('keydown',e=>{
   if(e.target.id==='nm')return;
@@ -172,6 +190,12 @@ function noise(dur,fc,type,vol){
   const s=c.createBufferSource(),f=c.createBiquadFilter(),gn=c.createGain();
   s.buffer=b;f.type=type;f.frequency.value=fc;gn.gain.value=vol;s.connect(f);f.connect(gn);gn.connect(c.destination);s.start();
 }
+const slap=()=>{noise(.12,1500,'bandpass',.9);tone(300,80,.1,'square',.35);};
+const burp=()=>{tone(95,55,.6,'sawtooth',.5,16,22);noise(.45,220,'lowpass',.3);};
+const moan=()=>{tone(300,540,.5,'sine',.35,6,25);tone(540,280,.6,'sine',.35,6,25,.5);};
+const laugh=()=>{for(let i=0;i<6;i++)tone(380+(i%2)*70,330+(i%2)*60,.1,'square',.1,0,0,i*.12);};
+const smooch=()=>{tone(900,300,.14,'sine',.3);noise(.08,2500,'highpass',.3);};
+const wah=()=>{tone(260,230,.3,'sawtooth',.25);tone(240,210,.3,'sawtooth',.25,0,0,.3);tone(220,150,.6,'sawtooth',.25,7,12,.6);};
 const fart=()=>{tone(120,45,.7,'sawtooth',.5,26,28);noise(.5,300,'lowpass',.4);};
 const monkey=()=>{[0,.18,.4,.58].forEach((d,i)=>tone(i%2?420:520,i%2?380:640,.15,'triangle',.4,12,40,d));};
 const raspberry=()=>{tone(220,140,.6,'square',.22,38,70);};
@@ -181,6 +205,20 @@ const blip=(fs,d)=>fs.forEach((f,i)=>tone(f,f,d,'square',.15,0,0,i*d));
 const win=()=>[523,659,784,1047].forEach((f,i)=>tone(f,f,.2,'triangle',.3,0,0,i*.15));
 
 // ----------------------------------------------------------- rendering ---
+const TAUNTS=[
+ {e:'💨',l:'Arschtrompete',t:'*ARSCHTROMPETE*',s:()=>fart()},
+ {e:'🍆',l:'Schwanzvergleich',t:'MEINER IST GRÖSSER!',s:()=>monkey()},
+ {e:'🖕',l:'Leck mich',t:'Leck mich am Sack!',s:()=>raspberry()},
+ {e:'🍑',l:'Arsch klatschen',t:'KLATSCH! Küss meinen Arsch!',s:()=>slap()},
+ {e:'🍺',l:'Rülpsen',t:'*RÜÜÜLPS* Noch ein Bier!',s:()=>burp()},
+ {e:'😩',l:'Stöhnen',t:'OOOH JA, SCHÄL MEINE BANANE!',s:()=>moan()},
+ {e:'🤣',l:'Auslachen',t:'HAHAHA, DU WICHSER!',s:()=>laugh()},
+ {e:'💋',l:'Schmatzen',t:'Komm her, du geile Sau!',s:()=>smooch()},
+ {e:'🥜',l:'Eier zeigen',t:'Hier, meine Eier, du Lutscher!',s:()=>wah()},
+ {e:'🍌',l:'Bananenbrecher',t:'Ich fick deine Banane!',s:()=>monkey()},
+ {e:'🤮',l:'Kotzen',t:'BÄÄÄÄH, riecht nach deiner Mutter!',s:()=>raspberry()},
+ {e:'👙',l:'Tanga-Tanz',t:'Schau mir in den Tanga, Baby!',s:()=>smooch()}
+];
 const wy=y=>H-y;
 function carveLocal(cx,cy,R){
   for(let c=Math.max(0,Math.floor((cx-R)/CW));c<=Math.min(NC-1,Math.floor((cx+R)/CW));c++){
@@ -369,9 +407,10 @@ function draw(now){
   pops.forEach(p=>{const u=1-(p.until-now)/900;g.font='bold '+p.s+'px Impact,sans-serif';g.textAlign='center';g.fillStyle='#ffe14d';g.strokeStyle='#6b1d0a';g.lineWidth=4;g.strokeText(p.t,p.x,p.y-u*40);g.fillText(p.t,p.x,p.y-u*40);});
   // speech bubbles
   bubbles=bubbles.filter(b=>now<b.until);
-  bubbles.forEach(b=>{const x=dx[b.i],y=wy(dy[b.i])-112;g.font='bold 13px sans-serif';const tw=g.measureText(b.t).width+16;
-    g.fillStyle='#fff';g.beginPath();g.roundRect(x-tw/2,y-22,tw,24,8);g.fill();g.beginPath();g.moveTo(x-5,y+2);g.lineTo(x,y+10);g.lineTo(x+5,y+2);g.fill();
-    g.fillStyle='#000';g.textAlign='center';g.fillText(b.t,x,y-5);});
+  bubbles.forEach(b=>{const ax=dx[b.i],y=Math.max(30,wy(dy[b.i])-112);g.font='bold 14px sans-serif';
+    const tw=Math.min(W-16,g.measureText(b.t).width+18),x=Math.max(tw/2+8,Math.min(W-tw/2-8,ax)),tx=Math.max(x-tw/2+12,Math.min(x+tw/2-12,ax));
+    g.fillStyle='#fff';g.beginPath();g.roundRect(x-tw/2,y-24,tw,26,9);g.fill();g.beginPath();g.moveTo(tx-6,y+1);g.lineTo(tx,y+11);g.lineTo(tx+6,y+1);g.fill();
+    g.fillStyle='#000';g.textAlign='center';g.fillText(b.t,x,y-6,tw-12);});
   hud(now);
   // commentary banner
   const cur=bq.find(b=>now>=b.s&&now<b.s+2800);bq=bq.filter(b=>now<b.s+2800);
@@ -383,6 +422,8 @@ function draw(now){
     const tx=S.win===2?'UNENTSCHIEDEN!':S.n[S.win]+' GEWINNT!';g.strokeText(tx,W/2,150);g.fillText(tx,W/2,150);}
   g.restore();
 }
+TAUNTS.forEach((T,n)=>{const b=document.createElement('button');b.innerHTML='<span class="e">'+T.e+'</span><span>'+T.l+'</span>';
+  b.onclick=()=>{audio();if(ws.readyState===1)ws.send('x'+n);};$('taunts').appendChild(b);});
 connect();requestAnimationFrame(draw);
 </script>
 </body></html>

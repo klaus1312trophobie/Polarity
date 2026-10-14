@@ -375,7 +375,7 @@ static void doThrow(int by, float ang, float pw, bool blind) {
 
   phase = P_FLY;
   animEnd = millis() + maxN * 50 + 1600;
-  if (!seat[by].human && rndi(0, 3) == 0) sendTaunt(by, rndi(0, 2));
+  if (!seat[by].human && rndi(0, 3) == 0) sendTaunt(by, rndi(0, 11));
 }
 
 static void botThrow() {
@@ -490,7 +490,7 @@ static void onWs(uint8_t num, WStype_t type, uint8_t *payload, size_t len) {
     doThrow(i, constrain(a, 2, 88), constrain(p, 5, 100), false);
   } else if (cmd == 'x' && len > 1 && millis() > seat[i].tauntAt) {   // taunt: x<0..2>
     seat[i].tauntAt = millis() + 1200;
-    sendTaunt(i, constrain(payload[1] - '0', 0, 2));
+    sendTaunt(i, constrain(atoi((const char *)payload + 1), 0, 11));
   }
 }
 
