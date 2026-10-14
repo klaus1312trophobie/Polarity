@@ -26,19 +26,26 @@ static const int   MAXPTS = 170, MAXSTEPS = 500;    // path points (every 3rd st
 static const uint32_t TURN_MS = 15000, OVER_MS = 9000;
 
 enum Phase { P_WAIT, P_AIM, P_FLY, P_OVER };
-enum Pu { PU_NONE, PU_MEGA, PU_TRIPLE, PU_BOUNCE, PU_NOWIND, PU_HEAL, PU_SWAP, PU_SHIELD, PU_CONSTIP, PU_COUNT };
+enum Pu { PU_NONE, PU_MEGA, PU_TRIPLE, PU_BOUNCE, PU_NOWIND, PU_HEAL, PU_SWAP, PU_SHIELD, PU_CONSTIP,
+          PU_RAIN, PU_NUKE, PU_EXTRA, PU_VAMP, PU_HOME, PU_COUNT };   // last five are the rare epic ones
 
 static const char *PU_NAME[] = {"", "Mega-Haufen", "Dünnschiss-Salve", "Gummi-Kacke", "Furz-Antrieb",
-                                "Heilbanane", "Platztausch", "Klopapier-Schild", "Verstopfung"};
+                                "Heilbanane", "Platztausch", "Klopapier-Schild", "Verstopfung",
+                                "Kack-Regen", "Arsch-Atombombe", "Dauerständer", "Schluckspecht", "Arschlochsucher"};
 static const char *PU_DESC[] = {"", "Ein Haufen so groß wie dein Ego. Riesenkrater.",
                                 "Drei Ladungen auf einmal. Der Darm kennt keine Gnade.", "Prallt ab wie die Frauen bei dir.",
                                 "Der Wind kann dich mal am Arsch lecken.", "Schälen, essen, +35 Leben. Du Ferkel.",
                                 "Ihr tauscht die Ärsche, äh Plätze.", "Der nächste Treffer wird halbiert. Wie bei deinem Schwanz.",
-                                "Der Gegner kann nur noch mit halber Kraft pressen."};
+                                "Der Gegner kann nur noch mit halber Kraft pressen.",
+                                "Nach dem Einschlag regnen vier weitere Scheißhaufen vom Himmel.",
+                                "So ein Haufen, dass die Erde bebt. Gigantischer Krater, brutaler Schaden.",
+                                "Du hast gleich nochmal einen Zug. Halt ihn oben.",
+                                "Du saugst dir die Hälfte des Schadens als Leben rein.",
+                                "Die Kacke sucht sich ihr Arschloch selbst: lenkt auf den Gegner."};
 
 struct Seat {
   bool human; uint8_t client; char name[14];
-  int hp; float x, y; int pu; bool shield, cap; uint32_t tauntAt;
+  int hp; float x, y; int pu; bool shield, cap, hat; int cos; uint32_t tauntAt;
 };
 struct Crate { bool on; int x, y; };
 struct Shot { int n; int16_t px[MAXPTS], py[MAXPTS]; bool impact; int ex, ey; uint8_t crates; };
@@ -46,10 +53,12 @@ struct Shot { int n; int16_t px[MAXPTS], py[MAXPTS]; bool impact; int ex, ey; ui
 static Seat seat[2];
 static Crate crate[2];
 static uint16_t hh[NC];                  // terrain height per column (y up from the bottom)
-static Shot shots[3];
+static const char *COS_NAME[] = {"Cowboy", "Superheld", "Ballerina", "Gentleman", "Pirat", "Clown", "Riesenbaby", "Weihnachtsmann", "Fiesta-Affe"};
+static Shot shots[5];
+static bool extraTurn = false;
 static int phase = P_WAIT, turn = 0, wind = 0, winner = -1;
 static uint32_t turnEnd, animEnd, overEnd, botAt;
-struct Waiter { uint8_t client; char name[14]; };
+struct Waiter { uint8_t client; char name[14]; bool hat; };
 static Waiter queue[6];
 static int qn = 0;
 static const int LED_PIN = 2;             // on-board LED: blinks 3x when an ape gets hit
@@ -141,7 +150,7 @@ static void spawnCrates() {
 
 // ------------------------------------------------------------ simulation ---
 // One throw. Records every 3rd step, stops at the first impact or when it leaves the world.
-static void simShot(Shot &s, int by, float ang, float pw, bool bounce, float wnd, bool rec) {
+static void simShot(Shot &s, int by, float ang, float pw, bool bounce, float wnd, bool rec, bool home = false) {
   const float dt = 1.0f / 60;
   float dir = seat[by].x < seat[1 - by].x ? 1 : -1, rad = ang * 0.0174533f, v = pw / 100.0f * VMAX;
   float x = seat[by].x + dir * 18, y = seat[by].y + 52;
@@ -149,6 +158,10 @@ static void simShot(Shot &s, int by, float ang, float pw, bool bounce, float wnd
   bool bounced = false;
   s.n = 0; s.impact = false; s.crates = 0; s.ex = (int)x; s.ey = (int)y;
   for (int step = 0; step < MAXSTEPS; step++) {
+    if (home && step > 15) {                                           // Arschlochsucher: steer at the enemy
+      float hx = seat[1 - by].x - x, hy = seat[1 - by].y + APE_DY - y, l = hypotf(hx, hy) + 0.01f;
+      vx += hx / l * 500 * dt; vy += hy / l * 500 * dt;
+    }
     vx += wnd * dt; vy -= GRAV * dt; x += vx * dt; y += vy * dt;
     if (x < -40 || x > W + 40 || y < -60) break;                       // flew away
     for (int k = 0; k < 2; k++)
@@ -190,11 +203,11 @@ static int buildState() {
   int t = (phase == P_AIM && seat[turn].human && turnEnd > now) ? (turnEnd - now) / 1000 : 0;
   int n = put(0, "{\"k\":\"st\",\"ph\":%d,\"turn\":%d,\"wind\":%d,\"t\":%d,\"win\":%d,"
                  "\"n\":[\"%s\",\"%s\"],\"b\":[%d,%d],\"hp\":[%d,%d],\"x\":[%d,%d],\"y\":[%d,%d],"
-                 "\"pu\":[%d,%d],\"sh\":[%d,%d],\"cp\":[%d,%d],\"cr\":[[%d,%d],[%d,%d]],\"log\":[",
+                 "\"pu\":[%d,%d],\"sh\":[%d,%d],\"cp\":[%d,%d],\"hat\":[%d,%d],\"cos\":[%d,%d],\"cr\":[[%d,%d],[%d,%d]],\"log\":[",
               phase, turn, wind, t, winner, seat[0].name, seat[1].name,
               !seat[0].human, !seat[1].human, seat[0].hp, seat[1].hp,
               (int)seat[0].x, (int)seat[1].x, (int)seat[0].y, (int)seat[1].y,
-              seat[0].pu, seat[1].pu, seat[0].shield, seat[1].shield, seat[0].cap, seat[1].cap,
+              seat[0].pu, seat[1].pu, seat[0].shield, seat[1].shield, seat[0].cap, seat[1].cap, seat[0].hat, seat[1].hat, seat[0].cos, seat[1].cos,
               crate[0].on ? crate[0].x : -1, crate[0].on ? crate[0].y : -1,
               crate[1].on ? crate[1].x : -1, crate[1].on ? crate[1].y : -1);
   for (int i = 0; i < logN; i++) n = put(n, "%s\"%s\"", i ? "," : "", logLine[i]);
@@ -234,19 +247,24 @@ static void startMatch() {
   ground();
   winner = -1; turn = rndi(0, 1);
   logN = 0;
+  extraTurn = false;
   say("Neue Runde: %s gegen %s. Möge der größere Wichser gewinnen.", seat[0].name, seat[1].name);
+  seat[0].cos = rndi(0, 8); seat[1].cos = rndi(0, 8);
+  say("%s kommt als %s, %s als %s.", seat[0].name, COS_NAME[seat[0].cos], seat[1].name, COS_NAME[seat[1].cos]);
+  for (int i = 0; i < 2; i++) if (seat[i].hat) say("%s trägt den Kackhut der Schande.", seat[i].name);
   startTurn();
   broadcastState();
 }
 
 static void awardPu(int by) {
-  int p = 1 + esp_random() % (PU_COUNT - 1);
+  int p = rndi(0, 99) < 30 ? PU_RAIN + (int)(esp_random() % 5) : 1 + (int)(esp_random() % 8);   // ~30 % epic
   Seat &me = seat[by];
   switch (p) {
     case PU_HEAL:    me.hp = min(100, me.hp + 35); break;
     case PU_SWAP:    { float t = seat[0].x; seat[0].x = seat[1].x; seat[1].x = t; ground(); break; }
     case PU_SHIELD:  me.shield = true; break;
     case PU_CONSTIP: seat[1 - by].cap = true; break;
+    case PU_EXTRA:   extraTurn = true; break;
     default:         me.pu = p;
   }
   say("%s reißt die Kiste auf: %s! %s", me.name, PU_NAME[p], PU_DESC[p]);
@@ -272,17 +290,30 @@ static void doThrow(int by, float ang, float pw, bool blind) {
   float wnd = kind == PU_NOWIND ? 0 : wind;
   if (me.cap) { pw = min(pw, 50.0f); me.cap = false; }
   int cnt = kind == PU_TRIPLE ? 3 : 1;
-  float R = kind == PU_MEGA ? CRATER_MEGA : CRATER;
-  float base = kind == PU_MEGA ? 52 : (kind == PU_TRIPLE ? 27 : 38);
+  float R = kind == PU_MEGA ? CRATER_MEGA : (kind == PU_NUKE ? 95 : CRATER);
+  float base = kind == PU_MEGA ? 52 : (kind == PU_TRIPLE ? 27 : (kind == PU_NUKE ? 75 : (kind == PU_RAIN ? 30 : 38)));
 
   if (blind) say("%s hat zu lange am Sack gekratzt und wirft blind.", me.name);
   int maxN = 0; uint8_t got = 0;
   for (int i = 0; i < cnt; i++) {
     float a = ang + (cnt == 3 ? (i - 1) * 6.0f : 0), p = pw * (cnt == 3 ? 1.0f + (i - 1) * 0.04f : 1.0f);
-    simShot(shots[i], by, a, p, kind == PU_BOUNCE, wnd, true);
-    maxN = max(maxN, shots[i].n);
+    simShot(shots[i], by, a, p, kind == PU_BOUNCE, wnd, true, kind == PU_HOME);
     got |= shots[i].crates;
   }
+  if (kind == PU_RAIN && shots[0].impact) {          // four more poops fall from the sky around the impact
+    static const int off[4] = {-130, -65, 65, 130};
+    for (int i = 1; i <= 4; i++) {
+      Shot &q = shots[i];
+      int x = constrain(shots[0].ex + off[i - 1], 10, W - 10), ey = hh[colOf(x)];
+      int pad = min(shots[0].n + 2 * i, MAXPTS - 12);   // wait until the first one has landed
+      q.n = 0;
+      for (int k = 0; k < pad; k++) { q.px[q.n] = x; q.py[q.n] = 560; q.n++; }
+      for (int k = 1; k <= 12; k++) { q.px[q.n] = x; q.py[q.n] = 560 + (ey - 560) * k / 12; q.n++; }
+      q.impact = true; q.ex = x; q.ey = ey; q.crates = 0;
+    }
+    cnt = 5;
+  }
+  for (int i = 0; i < cnt; i++) maxN = max(maxN, shots[i].n);
 
   // flight paths go out first, the resulting world follows when the animation is over
   int n = put(0, "{\"k\":\"shot\",\"by\":%d,\"kind\":%d,\"p\":[", by, kind);
@@ -322,6 +353,11 @@ static void doThrow(int by, float ang, float pw, bool blind) {
     }
     seat[a].hp = max(0, seat[a].hp - dmg[a]);
   }
+  if (kind == PU_VAMP && by != en && dmg[en] > 0) {
+    int h = dmg[en] / 2;
+    me.hp = min(100, me.hp + h);
+    say("%s saugt sich %d Leben aus %s raus.", me.name, h, seat[en].name);
+  }
   ground();
   if (dmg[0] > 0 || dmg[1] > 0) {                         // blink when the poop lands, not when it leaves
     int hitN = 0;
@@ -349,7 +385,7 @@ static void botThrow() {
   Shot tmp;
   for (int i = 0; i < 25; i++) {
     float a = rnd(25, 80), p = rnd(30, maxP);
-    simShot(tmp, turn, a, p, me.pu == PU_BOUNCE, wnd, false);
+    simShot(tmp, turn, a, p, me.pu == PU_BOUNCE, wnd, false, me.pu == PU_HOME);
     float d = tmp.impact ? hypotf(tmp.ex - en.x, tmp.ey - (en.y + APE_DY)) : 1e9f;
     if (d < bestD) { bestD = d; bestA = a; bestP = p; }
   }
@@ -364,7 +400,8 @@ static void endFly() {
     if (winner == 2) say("Unentschieden: beide sind gleich beschissen.");
     else say("%s gewinnt! %s kann sich jetzt den Arsch mit der Zahnbürste putzen.", seat[winner].name, seat[1 - winner].name);
   } else {
-    turn = 1 - turn;
+    if (extraTurn) { extraTurn = false; say("%s darf nochmal ran. Ständer sei Dank.", seat[turn].name); }
+    else turn = 1 - turn;
     startTurn();
   }
   broadcastState();
@@ -377,7 +414,7 @@ static int seatOf(uint8_t num) {
 }
 
 static void setBot(int i) {
-  seat[i].human = false;
+  seat[i].human = false; seat[i].hat = false;
   strcpy(seat[i].name, i ? "Affe 2.0" : "Gorilla-KI");
 }
 
@@ -387,9 +424,9 @@ static void sendYou(uint8_t num, int s, int q) {
 }
 static void notifyQueue() { for (int k = 0; k < qn; k++) sendYou(queue[k].client, -1, k + 1); }
 static int queueIndex(uint8_t num) { for (int k = 0; k < qn; k++) if (queue[k].client == num) return k; return -1; }
-static void enqueue(uint8_t num, const char *name) {
+static void enqueue(uint8_t num, const char *name, bool hat = false) {
   if (qn >= 6 || queueIndex(num) >= 0) return;
-  queue[qn].client = num; strncpy(queue[qn].name, name, 13); queue[qn].name[13] = 0; qn++;
+  queue[qn].client = num; strncpy(queue[qn].name, name, 13); queue[qn].name[13] = 0; queue[qn].hat = hat; qn++;
 }
 static void dequeueAt(int k) { for (; k < qn - 1; k++) queue[k] = queue[k + 1]; qn--; }
 
@@ -397,8 +434,8 @@ static void dequeueAt(int k) { for (; k < qn - 1; k++) queue[k] = queue[k + 1]; 
 static void promote(int s) {
   if (qn == 0) return;
   Waiter w = queue[0]; dequeueAt(0);
-  if (seat[s].human) { uint8_t old = seat[s].client; char nm[14]; strcpy(nm, seat[s].name); enqueue(old, nm); }
-  seat[s].human = true; seat[s].client = w.client; strcpy(seat[s].name, w.name);
+  if (seat[s].human) { uint8_t old = seat[s].client; char nm[14]; strcpy(nm, seat[s].name); enqueue(old, nm, seat[s].hat); }
+  seat[s].human = true; seat[s].client = w.client; strcpy(seat[s].name, w.name); seat[s].hat = w.hat;
   sendYou(w.client, s, 0);
 }
 
@@ -439,7 +476,7 @@ static void onWs(uint8_t num, WStype_t type, uint8_t *payload, size_t len) {
       return;
     }
     sendYou(num, s, 0);
-    seat[s].human = true; seat[s].client = num; strcpy(seat[s].name, name);
+    seat[s].human = true; seat[s].client = num; strcpy(seat[s].name, name); seat[s].hat = false;
     if (!seat[1 - s].human) setBot(1 - s);
     startMatch();
     return;
@@ -481,8 +518,9 @@ void apesLoop() {
     if (now >= animEnd) endFly();
   } else if (phase == P_OVER) {
     if (now >= overEnd) {
+      int loser = winner == 2 ? rndi(0, 1) : 1 - winner;
+      if (winner != 2) { seat[loser].hat = true; seat[winner].hat = false; }   // loser wears the poop hat next round
       if (qn > 0) {                              // challenger replaces the loser
-        int loser = winner == 2 ? rndi(0, 1) : 1 - winner;
         promote(loser);
         notifyQueue();
         if (!seat[1 - loser].human) setBot(1 - loser);

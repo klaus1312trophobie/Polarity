@@ -64,8 +64,8 @@ const char APES_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
 'use strict';
 const W=800,H=450,CW=4,NC=200,WA=96,WB=103;
 const $=id=>document.getElementById(id), cv=$('cv'), g=cv.getContext('2d');
-const PU=['','Mega-Haufen','Dünnschiss-Salve','Gummi-Kacke','Furz-Antrieb','Heilbanane','Platztausch','Klopapier-Schild','Verstopfung'];
-const PUI=['','💥','💩💩💩','🏀','💨','🍌','🔀','🧻','🤢'];
+const PU=['','Mega-Haufen','Dünnschiss-Salve','Gummi-Kacke','Furz-Antrieb','Heilbanane','Platztausch','Klopapier-Schild','Verstopfung','Kack-Regen','Arsch-Atombombe','Dauerständer','Schluckspecht','Arschlochsucher'];
+const PUI=['','💥','💩💩💩','🏀','💨','🍌','🔀','🧻','🤢','☄️','☢️','🍆','🧛','🎯'];
 const NAMES=['Bananen-Bernd','Kack-Kevin','Sack-Steve','Arsch-Axel','Affen-Alfred','Furz-Frank','Gorilla-Gisela','Eier-Erwin','Schwanz-Siggi','Pimmel-Paul'];
 const FLAVOR=['%s kratzt sich am Sack und denkt nach…','%s wühlt sich im Arsch nach Munition…','%s drückt noch eine Ladung raus…','%s spielt kurz an sich rum und zielt dann…','%s flucht wie ein Bierkutscher…'];
 const WORDS=['PLATSCH!','FLATSCH!','SCHEISSE!','PFFFT!','BLÖRP!','ARSCH!','SPRITZ!'];
@@ -100,6 +100,7 @@ function handle(m){
     anim={t0:performance.now(),p:m.p,ex:m.ex,done:m.p.map(()=>false),end:0,by:m.by};
     const p=m.p[0];if(p.length>3)aim[m.by]=Math.atan2(p[3]-p[1],Math.abs(p[2]-p[0]))*57.3;
     whoosh();
+    if(m.kind>0)pops.push({x:W/2,y:150,t:PU[m.kind].toUpperCase()+'!',until:performance.now()+1500,s:m.kind>=9?44:34});
   }
   else if(m.k==='taunt'){
     const t=['*ARSCHTROMPETE*','UUH UUH, ICH FICK DEINE BANANE!','Leck mich am Sack!'][m.n];
@@ -191,7 +192,7 @@ function splatFx(x,y,R){
   for(let i=0;i<R*1.2;i++){const a=Math.random()*6.28,v=60+Math.random()*220;
     parts.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v+120,life:.7+Math.random()*.8,r:2+Math.random()*4,c:Math.random()<.8?'#6b3f1d':'#8a5a2b'});}
   pops.push({x,y:y+20,t:WORDS[Math.floor(Math.random()*WORDS.length)],until:performance.now()+900,s:R>40?34:24});
-  shake=R>40?14:6;splat();
+  shake=R>80?32:(R>40?14:6);splat();
 }
 function poop(x,y,s,r,stink){
   g.save();g.translate(x,y);g.rotate(r);g.scale(s,s);
@@ -205,6 +206,29 @@ function poop(x,y,s,r,stink){
   g.restore();
 }
 const face=i=>S.x[i]<S.x[1-i]?1:-1;
+const HATUP=[12,0,0,18,0,12,0,14,12];
+function costume(c,d,bob,front){
+  g.save();g.lineWidth=1.5;
+  if(!front){
+    if(c===1){g.fillStyle='#d6212a';g.beginPath();g.moveTo(-d*8,-44+bob);g.lineTo(-d*34,-4);g.lineTo(-d*2,-12);g.closePath();g.fill();}
+  }else if(c===0){g.fillStyle='#8b5a2b';g.beginPath();g.ellipse(0,-66+bob,21,4.5,0,0,7);g.fill();g.fillRect(-9,-77+bob,18,11);g.fillStyle='#c0392b';g.fillRect(-9,-69+bob,18,3);}
+  else if(c===1){g.fillStyle='#222';g.fillRect(-14,-60+bob,28,6);g.fillStyle='#fff';g.beginPath();g.arc(0,-57+bob,0,0,7);g.fill();
+    g.fillStyle='#ffe14d';g.beginPath();g.moveTo(d*2,-36+bob);g.lineTo(d*10,-30+bob);g.lineTo(d*2,-20+bob);g.lineTo(-d*6,-30+bob);g.closePath();g.fill();
+    g.fillStyle='#fff';g.beginPath();g.arc(d*0,-57+bob,2.6,0,7);g.arc(d*8,-57+bob,2.6,0,7);g.fill();g.fillStyle='#000';g.beginPath();g.arc(d*1,-57+bob,1.3,0,7);g.arc(d*9,-57+bob,1.3,0,7);g.fill();}
+  else if(c===2){g.fillStyle='#ff7ac8';g.beginPath();g.ellipse(0,-14,21,6,0,0,7);g.fill();g.strokeStyle='#ff4aa8';for(let k=-3;k<=3;k++){g.beginPath();g.moveTo(k*5,-14);g.lineTo(k*6.5,-10);g.stroke();}
+    g.fillStyle='#ff7ac8';g.beginPath();g.arc(-d*12,-64+bob,5,0,7);g.arc(-d*7,-66+bob,4,0,7);g.fill();}
+  else if(c===3){g.fillStyle='#111';g.beginPath();g.ellipse(0,-66+bob,17,3.5,0,0,7);g.fill();g.fillRect(-10,-84+bob,20,18);g.fillStyle='#c0392b';g.fillRect(-10,-71+bob,20,3);
+    g.strokeStyle='#e6b800';g.lineWidth=2;g.beginPath();g.arc(d*8,-56+bob,5.5,0,7);g.stroke();g.beginPath();g.moveTo(d*8,-50+bob);g.lineTo(d*10,-36+bob);g.stroke();}
+  else if(c===4){g.fillStyle='#c0392b';g.fillRect(-14,-65+bob,28,6);g.beginPath();g.arc(-d*15,-62+bob,4,0,7);g.fill();g.beginPath();g.moveTo(-d*15,-62+bob);g.lineTo(-d*22,-56+bob);g.lineTo(-d*18,-68+bob);g.fill();
+    g.fillStyle='#000';g.beginPath();g.arc(d*8,-56+bob,5,0,7);g.fill();g.strokeStyle='#000';g.lineWidth=1.5;g.beginPath();g.moveTo(-13,-62+bob);g.lineTo(d*8,-56+bob);g.stroke();}
+  else if(c===5){g.fillStyle='#ffb02e';g.beginPath();g.arc(-14,-62+bob,7,0,7);g.arc(14,-62+bob,7,0,7);g.fill();g.fillStyle='#3ccf4e';g.beginPath();g.arc(0,-69+bob,7,0,7);g.arc(-8,-67+bob,6,0,7);g.arc(8,-67+bob,6,0,7);g.fill();
+    g.fillStyle='#e8212a';g.beginPath();g.arc(d*5,-51+bob,5,0,7);g.fill();}
+  else if(c===6){g.fillStyle='#f5f5f5';g.beginPath();g.roundRect(-14,-22,28,13,4);g.fill();g.fillStyle='#ffe14d';g.beginPath();g.ellipse(d*3,-15,4,3,0,0,7);g.fill();g.fillStyle='#4aa3ff';g.fillRect(-14,-20,5,3);g.fillRect(9,-20,5,3);
+    g.fillStyle='#ffd0e0';g.beginPath();g.arc(d*4,-45+bob,3,0,7);g.fill();}
+  else if(c===7){g.fillStyle='#d6212a';g.beginPath();g.moveTo(-13,-64+bob);g.lineTo(13,-64+bob);g.lineTo(d*6,-88+bob);g.closePath();g.fill();g.fillStyle='#fff';g.fillRect(-14,-68+bob,28,5);g.beginPath();g.arc(d*6,-88+bob,4,0,7);g.fill();}
+  else if(c===8){g.fillStyle='#ffd23f';g.beginPath();g.ellipse(0,-66+bob,28,5,0,0,7);g.fill();g.beginPath();g.moveTo(-9,-66+bob);g.lineTo(-6,-80+bob);g.lineTo(6,-80+bob);g.lineTo(9,-66+bob);g.fill();g.fillStyle='#d6212a';g.fillRect(-9,-71+bob,18,3);g.fillStyle='#2e9d4f';g.fillRect(-9,-76+bob,18,2);}
+  g.restore();
+}
 function drawApe(i,t,now){
   const x=dx[i],fy=wy(dy[i])-(Math.abs(S.x[i]-dx[i])>2?Math.abs(Math.sin(now/70))*7:0),d=face(i),dead=S.hp[i]<=0,ouch=now<hurt[i];
   const bob=dead?0:Math.sin(t/260+i*2)*1.6;
@@ -214,6 +238,7 @@ function drawApe(i,t,now){
   if(dead){g.rotate(d*-1.35);g.translate(0,-6);}
   g.lineCap='round';
   g.strokeStyle=fur;g.lineWidth=8;g.beginPath();g.moveTo(-6,-14);g.lineTo(-8,-2);g.moveTo(6,-14);g.lineTo(8,-2);g.stroke();
+  const cs=S.cos?S.cos[i]:-1;costume(cs,d,bob,false);
   g.fillStyle=fur;g.beginPath();g.ellipse(0,-28+bob,15,18,0,0,7);g.fill();
   g.fillStyle=light;g.beginPath();g.ellipse(d*2,-26+bob,9,12,0,0,7);g.fill();
   // back arm
@@ -228,6 +253,8 @@ function drawApe(i,t,now){
   else{g.beginPath();g.arc(d*1.5,-56+bob,1.6,0,7);g.arc(d*9.5,-56+bob,1.6,0,7);g.fill();
     g.beginPath();g.arc(d*4,-49+bob,4,.2,2.9);g.stroke();}
   g.beginPath();g.arc(d*2,-52+bob,.9,0,7);g.arc(d*6,-52+bob,.9,0,7);g.fill();
+  costume(cs,d,bob,true);
+  if(S.hat&&S.hat[i]){poop(0,-73-(HATUP[cs]||0)+bob,1.7,Math.sin(t/400)*.08,true);g.fillStyle='#222';for(let k=0;k<2;k++){const a=t/90+k*3;g.beginPath();g.arc(Math.cos(a)*14,-84+bob+Math.sin(a*1.3)*6,1.6,0,7);g.fill();}}
   // front arm (aims along the launch angle)
   const aimA=(me===i&&S.ph===1&&S.turn===i?ang:aim[i])*Math.PI/180,sx=d*11,sy=-38+bob;
   const hx=sx+d*Math.cos(aimA)*22,hy=sy-Math.sin(aimA)*22;
