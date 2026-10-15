@@ -26,12 +26,12 @@ const char MENU_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
   .kl{background:linear-gradient(135deg,#1c2229,#3a424c);border-color:#ffcf5a88}
   .kl h2{color:#ffcf5a;text-shadow:3px 3px 0 #5a4310}
   .live{position:absolute;right:14px;top:14px;font-size:12px;background:#000a;border-radius:99px;padding:4px 10px;min-height:22px}
-  #mus{position:fixed;right:12px;top:12px;background:#000a;color:#e8ecff;border:2px solid #ffffff33;border-radius:99px;
+  #mus{position:fixed;right:12px;top:12px;font-size:18px;background:#000a;color:#e8ecff;border:2px solid #ffffff33;border-radius:99px;
     padding:8px 14px;font-size:14px;cursor:pointer;font-family:inherit}
   .foot{margin-top:28px;color:#8a90b8;font-size:12px;text-align:center;line-height:1.7}
 </style></head>
 <body>
-  <button id="mus" title="Musik an/aus">🔇 Musik</button>
+  <button id="mus" class="mutebtn">🔊</button>
   <h1>ESP ARCADE</h1>
   <div class="sub">Drei Spiele, ein kleiner Chip. Such dir eins aus.</div>
   <div class="grid">
@@ -55,6 +55,7 @@ const char MENU_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
     </a>
   </div>
   <div class="foot">Tipp: Zum Wechseln einfach hierher zurück (⬅ Spielauswahl).<br>Bots füllen leere Plätze auf.</div>
+<script src="/sfx.js"></script>
 <script>
 async function poll(){
   try{
@@ -94,19 +95,19 @@ poll();
     o.frequency.value=freq;
     g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.01);
     g.gain.setValueAtTime(vol,t+dur*.7);g.gain.linearRampToValueAtTime(0,t+dur);
-    o.connect(g).connect(ac.destination);o.start(t);o.stop(t+dur+.02);
+    o.connect(g).connect(SFX.out);o.start(t);o.stop(t+dur+.02);
   }
   function tri(freq,t,dur,vol){
     const o=ac.createOscillator(),g=ac.createGain();
     o.type='triangle';o.frequency.value=freq;
     g.gain.setValueAtTime(vol,t);g.gain.linearRampToValueAtTime(0,t+dur);
-    o.connect(g).connect(ac.destination);o.start(t);o.stop(t+dur+.02);
+    o.connect(g).connect(SFX.out);o.start(t);o.stop(t+dur+.02);
   }
   function hat(t){
     const s=ac.createBufferSource(),g=ac.createGain(),h=ac.createBiquadFilter();
     s.buffer=noiseBuf;h.type='highpass';h.frequency.value=6000;
     g.gain.setValueAtTime(.05,t);g.gain.linearRampToValueAtTime(0,t+.04);
-    s.connect(h).connect(g).connect(ac.destination);s.start(t);s.stop(t+.05);
+    s.connect(h).connect(g).connect(SFX.out);s.start(t);s.stop(t+.05);
   }
   let pos=0;                              // position in eighths
   function sched(){
@@ -126,22 +127,20 @@ poll();
   function start(){
     if(on)return;
     try{
-      ac=ac||new (window.AudioContext||window.webkitAudioContext)();
+      ac=SFX.ctx();if(!ac)return;
       if(!noiseBuf){noiseBuf=ac.createBuffer(1,2048,ac.sampleRate);
         const d=noiseBuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;}
       ac.resume();
       if(ac.state!=='running'&&ac.state!=='suspended')return;
       on=true;t0=ac.currentTime+.1;idx=0;pos=0;sched();
-      btn.textContent='🔊 Musik';
     }catch(e){}
   }
-  function stop(){on=false;clearTimeout(timer);btn.textContent='🔇 Musik';}
-  btn.onclick=e=>{e.stopPropagation();on?stop():start();muted=!on;};
-  let muted=false;
+  function stop(){on=false;clearTimeout(timer);}
+  SFX.onMute(m=>{m?stop():start();});
   // browsers block autoplay: start on first interaction unless user muted
-  const first=()=>{if(ac&&ac.state!=="running")ac.resume();if(!muted&&!on)start();window.removeEventListener('pointerdown',first);window.removeEventListener('keydown',first);};
+  const first=()=>{if(ac&&ac.state!=="running")ac.resume();if(!SFX.muted&&!on)start();window.removeEventListener('pointerdown',first);window.removeEventListener('keydown',first);};
   window.addEventListener('pointerdown',first);window.addEventListener('keydown',first);
-  start();
+  if(!SFX.muted)start();
 })();
 </script>
 </body></html>

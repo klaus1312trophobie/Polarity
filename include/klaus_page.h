@@ -85,7 +85,7 @@ const char KLAUS_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
   #mute{position:fixed;top:8px;right:10px;background:#3a424c;color:var(--ink);padding:4px 10px;z-index:5}
 </style></head>
 <body>
-<button id="mute">🔊</button>
+<button id="mute" class="mutebtn">🔊</button>
 <div id="wrap">
   <h1>🛗 KLAUSTROPHOBIE <small>der Fahrstuhl zur Hölle</small></h1>
   <canvas id="cv" width="800" height="450"></canvas>
@@ -111,6 +111,7 @@ const char KLAUS_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
   <button id="go">EINSTEIGEN</button>
   <p style="font-size:12px">Allein? Dann fahren drei Bots mit. Bis zu sechs Menschen passen rein.</p>
 </div></div>
+<script src="/sfx.js"></script>
 <script>
 'use strict';
 const GW=6,GH=4;let CWD=104,CHT=76,X0=88,Y0=104,W=800,H=450,PORT=false;
@@ -120,7 +121,7 @@ const NPC=['','🥖','👵','👶','📱','🐕','🏃'];
 const NPCN=['','Karl','Gisela','Kevin','Tobi','Wauwi','Jens'];
 const NAMES=['Schweiß-Sven','Pups-Petra','Mief-Michi','Quetsch-Quentin','Duft-Dieter','Stink-Steffi','Klaus-Trophobie'];
 const TAUNTS=[['🤢','Boah!'],['😡','Rück weg!'],['🙏','Bitte nicht!'],['😂','Haha!'],['🧼','Dusch mal!'],['🪟','Fenster!'],['👃','Wer war das?'],['🚪','Ich will raus!']];
-let ws,me=-2,myQ=0,S=null,joined=null,rx=0,AC=null,muted=false,lastFl=0,lastPh=0;
+let ws,me=-2,myQ=0,S=null,joined=null,rx=0,AC=null,lastFl=0,lastPh=0,lastOut=false,rdy=[0,0],hbT=0;
 const vis={},parts=[],pops=[],bubbles=[],gasP=[];let banner=null,shake=0;
 
 function connect(){
@@ -138,8 +139,8 @@ function handle(m){
     m.fx.forEach(fxEvent);
     m.log.forEach(addLog);
     if(m.ph===2&&lastPh!==2)banner={t:'DING! Etage '+m.fl,until:performance.now()+1500};
-    if(m.ph===3&&lastPh!==3){banner={t:m.win>=0?m.s[m.win][1]+' gewinnt!':'Ende',until:performance.now()+4000};if(m.win===me)win();}
-    lastPh=m.ph;ui();sidebar();
+    if(m.ph===3&&lastPh!==3){banner={t:m.win>=0?m.s[m.win][1]+' gewinnt!':'Ende',until:performance.now()+4000};}
+    phSounds(m);lastPh=m.ph;ui();sidebar();
   }
   else if(m.k==='taunt'&&S){
     const T=TAUNTS[m.n]||TAUNTS[0];bubbles.push({i:m.by,t:T[0]+' '+T[1],until:performance.now()+2200});blip([500,420],.08);
@@ -193,7 +194,7 @@ function sidebar(){
 }
 function esc(t){return t.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function cdBtn(id,rem,max){
-  const b=$(id),r=Math.max(0,rem-(performance.now()-rx)/100);
+  const b=$(id),r=Math.max(0,rem-(performance.now()-rx)/100),k=id==='bf'?0:1,was=rdy[k];rdy[k]=r<=0?1:0;if(!was&&rdy[k]&&me>=0&&S&&S.s[me][3]===1)SFX.tone(k?1175:1568,.05,{type:'p25',vol:.05});
   b.querySelector('i').style.width=(r>0?100*r/max:0)+'%';b.classList.toggle('ready',r<=0&&me>=0&&S&&S.s[me][3]===1);
 }
 setInterval(()=>{ui();if(S&&me>=0){cdBtn('bf',S.s[me][5],55);cdBtn('bd',S.ph===2?S.s[me][6]:99,80);}},120);
@@ -211,7 +212,6 @@ TAUNTS.forEach((t,i)=>{const b=document.createElement('button');b.innerHTML=t[0]
 function send(s){if(ws&&ws.readyState===1)ws.send(s);}
 $('bf').onpointerdown=e=>{e.preventDefault();audio();send('f');};
 $('bd').onpointerdown=e=>{e.preventDefault();audio();send('b');};
-$('mute').onclick=()=>{muted=!muted;$('mute').textContent=muted?'🔇':'🔊';};
 const KEYS={ArrowUp:[0,-1],w:[0,-1],ArrowRight:[1,0],d:[1,0],ArrowDown:[0,1],s:[0,1],ArrowLeft:[-1,0],a:[-1,0],e:[1,-1],c:[1,1],z:[-1,1],q:[-1,-1]};
 addEventListener('keydown',e=>{
   if(e.target.id==='nm')return;
@@ -231,26 +231,26 @@ cv.addEventListener('pointerdown',e=>{
   for(let d=0;d<8;d++)if(SD[d][0]===dx&&SD[d][1]===dy){send('m'+d);break;}
 });
 $('nm').value=localStorage.getItem('klausname')||NAMES[Math.floor(Math.random()*NAMES.length)];
-function join(){audio();try{navigator.wakeLock&&navigator.wakeLock.request('screen').catch(()=>{});}catch(e){}
+function join(){audio();SFX.lib.click();try{navigator.wakeLock&&navigator.wakeLock.request('screen').catch(()=>{});}catch(e){}
   joined=$('nm').value.trim()||'Passagier';localStorage.setItem('klausname',joined);if(ws.readyState===1)ws.send('j'+joined);}
 $('go').onclick=join;$('nm').onkeydown=e=>{if(e.key==='Enter')join();};
 
 // --------------------------------------------------------------- sound ---
-function audio(){if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContext)();}catch(e){}}if(AC&&AC.state==='suspended')AC.resume();return AC;}
+function audio(){AC=SFX.ctx();return AC;}
 function tone(f0,f1,dur,type,vol,wob,wd,delay){
-  const c=audio();if(!c||muted)return;const t=c.currentTime+(delay||0);
+  const c=audio();if(!c||SFX.muted)return;const t=c.currentTime+(delay||0);
   const o=c.createOscillator(),gn=c.createGain();o.type=type;
   o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(f1,t+dur);
   gn.gain.setValueAtTime(vol,t);gn.gain.exponentialRampToValueAtTime(.001,t+dur);
   if(wob){const l=c.createOscillator(),lg=c.createGain();l.frequency.value=wob;lg.gain.value=wd;l.connect(lg);lg.connect(o.frequency);l.start(t);l.stop(t+dur);}
-  o.connect(gn);gn.connect(c.destination);o.start(t);o.stop(t+dur);
+  o.connect(gn);gn.connect(SFX.out);o.start(t);o.stop(t+dur);
 }
 function noise(dur,fc,type,vol){
-  const c=audio();if(!c||muted)return;
+  const c=audio();if(!c||SFX.muted)return;
   const b=c.createBuffer(1,c.sampleRate*dur,c.sampleRate),d=b.getChannelData(0);
   for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*(1-i/d.length);
   const s=c.createBufferSource(),f=c.createBiquadFilter(),gn=c.createGain();
-  s.buffer=b;f.type=type;f.frequency.value=fc;gn.gain.value=vol;s.connect(f);f.connect(gn);gn.connect(c.destination);s.start();
+  s.buffer=b;f.type=type;f.frequency.value=fc;gn.gain.value=vol;s.connect(f);f.connect(gn);gn.connect(SFX.out);s.start();
 }
 const fart=()=>{tone(120+Math.random()*60,45,.7,'sawtooth',.45,26,28);noise(.5,300,'lowpass',.35);};
 const thump=()=>{tone(150,50,.15,'square',.4);noise(.1,600,'lowpass',.5);};
@@ -258,11 +258,26 @@ const wah=()=>{tone(260,230,.3,'sawtooth',.25);tone(240,210,.3,'sawtooth',.25,0,
 const laugh=()=>{for(let i=0;i<6;i++)tone(380+(i%2)*70,330+(i%2)*60,.1,'square',.1,0,0,i*.12);};
 const ding=()=>{tone(1320,1318,.9,'sine',.3);tone(880,878,1.1,'sine',.25,0,0,.25);};
 function blip(a,v){tone(a[0],a[1],.1,'square',v||.1);}
-function win(){[0,.15,.3,.5].forEach((d,i)=>tone(520+i*130,540+i*130,.2,'triangle',.3,0,0,d));}
+function win(){SFX.lib.fanfare();}
+function phSounds(m){
+  if(m.ph===1&&lastPh===0)SFX.lib.go();
+  if(m.ph===2&&lastPh!==2)SFX.seq([[88,1],[84,2]],{step:.12,type:'p12',vol:.1});     // doors slide open
+  if(m.ph===1&&lastPh===2)SFX.noise(.5,{type:'lowpass',fc:700,fc2:200,vol:.3});      // doors close
+  if(m.ph===3&&lastPh!==3){
+    if(m.win===me&&me>=0)win();else if(me>=0)SFX.lib.sad();else SFX.seq([[72,1],[76,1],[79,3]],{step:.09,type:'p25',vol:.12});
+  }
+  if(me>=0&&m.s[me]){const alive=!!m.s[me][3];if(lastOut&&alive)lastOut=false;if(!alive&&!lastOut){lastOut=true;SFX.tone(300,.8,{to:60,type:'sawtooth',vol:.18,vib:[8,30]});}}
+}
+// heartbeat that speeds up with your discomfort
+(function beat(){
+  const d=S&&me>=0&&S.s[me]&&S.s[me][3]&&S.ph!==0&&S.ph!==3?S.s[me][4]:0;
+  if(d>=55&&!SFX.muted){const v=Math.min(.5,.18+(d-55)/90);SFX.tone(70,.12,{to:45,type:'sine',vol:v});SFX.tone(70,.12,{to:45,type:'sine',vol:v*.7,at:.17});}
+  setTimeout(beat,d>=55?Math.max(380,900-(d-55)*12):600);
+})();
 // elevator muzak that drifts out of tune the higher you get
 const TUNE=[261,329,392,329,293,349,440,349,261,392,523,392];let mi=0;
 setInterval(()=>{
-  if(!S||muted||!AC||S.bo||S.ph===3||S.ph===0)return;
+  if(!S||SFX.muted||!AC||S.bo||S.ph===3||S.ph===0)return;
   const det=Math.pow(2,((S.fl-1)*(Math.random()-.3)*14)/1200),f=TUNE[mi++%TUNE.length]*det;
   tone(f,f*.995,.38,'sine',.05);
 },420);

@@ -22,6 +22,7 @@
 #include "apes.h"
 #include "klaus.h"
 #include "menu_page.h"
+#include "sfx.h"
 
 // ---------------------------------------------------------------- tuning ---
 static const float ARENA_R        = 400;   // arena radius at round start
@@ -696,6 +697,7 @@ void setup() {
   ArduinoOTA.begin();
 
   http.on("/", [] { http.send_P(200, "text/html", MENU_PAGE); });
+  http.on("/sfx.js", [] { http.sendHeader("Cache-Control", "max-age=600"); http.send_P(200, "application/javascript", SFX_JS); });
   http.on("/polarity", [] { http.send_P(200, "text/html", PAGE); });
   http.on("/apes", [] { http.send_P(200, "text/html", apesPage()); });
   http.on("/klaus", [] { http.send_P(200, "text/html", klausPage()); });

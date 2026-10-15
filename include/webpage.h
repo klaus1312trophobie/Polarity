@@ -46,10 +46,16 @@ const char PAGE[] PROGMEM = R"rawliteral(<!doctype html>
     background:#ffffff10;border:1px solid #3a4078;border-radius:6px;padding:6px 10px;cursor:pointer;display:none;z-index:3}
   #bots.off{border-color:#ffd23f;color:#ffd23f}
   #bflip{right:22px} #bsurge{right:118px;width:66px;height:66px;bottom:34px;font-size:12px;border-color:#ffd23f88}
+  #topbtns{position:fixed;top:12px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:6}
+  #topbtns a,.mutebtn{font:700 13px ui-monospace,monospace;color:var(--ink);text-decoration:none;background:#ffffff10;
+    border:1px solid #3a4078;border-radius:6px;padding:6px 11px;cursor:pointer;touch-action:manipulation}
+  .mutebtn{font-size:16px;padding:4px 10px}
+  #menu .mutebtn{position:absolute;top:12px;right:12px}
   body.touch .tbtn{display:flex} body.touch #self{bottom:120px}
 </style></head>
 <body>
 <canvas id="c"></canvas>
+<div id="topbtns"><a id="back" href="/">⬅ Spiele</a><button class="mutebtn" id="mute">🔊</button></div>
 <div id="timer" class="panel"></div>
 <div id="board" class="panel"></div>
 <div id="feed" class="panel"></div>
@@ -59,7 +65,7 @@ const char PAGE[] PROGMEM = R"rawliteral(<!doctype html>
 <div class="tbtn" id="bsurge">SURGE</div>
 <div class="tbtn" id="bflip">FLIP</div>
 
-<div id="menu"><div class="card">
+<div id="menu"><button class="mutebtn" id="mute2">🔊</button><div class="card">
   <h1><span class="p">POLA</span><span class="m">RITY</span></h1>
   <div class="tag">a magnetic arena game &middot; served by a tiny ESP32</div>
   <input id="name" maxlength="12" placeholder="your name" autocomplete="off">
@@ -84,6 +90,7 @@ const char PAGE[] PROGMEM = R"rawliteral(<!doctype html>
   <div class="best"><a href="/" style="color:#ffd23f">⬅ Spielauswahl</a></div>
 </div></div>
 
+<script src="/sfx.js"></script>
 <script>
 const PLUS = '#ff3b6b', MINUS = '#2ee6ff', GOLD = '#ffd23f', ARENA0 = 400, RANGE = 280, ORB_RANGE = 180;
 // power-ups: id -> [name, color, icon]
@@ -110,15 +117,32 @@ function resize() {
 addEventListener('resize', resize); resize();
 
 // -------------------------------------------------------------- sound ---
-let actx = null;
-function beep(f, dur, type = 'sine', vol = .08, slide = 0) {
-  if (!actx) return;
-  const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime;
-  o.type = type; o.frequency.setValueAtTime(f, t);
-  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, f + slide), t + dur);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
-  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + dur);
-}
+// everything goes through the shared engine (/sfx.js); other players' sounds are
+// attenuated by distance and panned left/right relative to you.
+const L = SFX.lib;
+const ears = () => { const p = cur && cur.byId[me]; return p && p[5] ? [p[1], p[2]] : [0, 0]; };
+const spat = (x, y, range = 520) => { const [mx, my] = ears(); return SFX.spat(x - mx, y - my, range); };
+let lastBump = 0;
+const snd = {
+  orb(mine, x, y, gold) {
+    if (mine) { gold ? SFX.seq([[79, 1], [84, 1], [88, 1], [91, 2]], {step: .06, type: 'p25', vol: .13}) : L.coin(.7); return; }
+    const q = spat(x, y, 460); if (gold) L.power(q.gain * .5, q.pan); else SFX.tone(1320, .05, {type: 'p25', vol: .05, gain: q.gain, pan: q.pan});
+  },
+  flip(pol) { SFX.tone(pol > 0 ? 330 : 494, .07, {to: pol > 0 ? 494 : 330, vol: .1}); },
+  surge(mine, x, y) { const q = mine ? {gain: 1, pan: 0} : spat(x, y, 600); L.whoosh(q.gain * (mine ? .9 : .5), q.pan, .45); SFX.tone(180, .4, {to: 760, type: 'sawtooth', vol: .07, gain: q.gain, pan: q.pan}); },
+  power(mine, x, y, type) {
+    if (type === 4) { const q = spat(x, y, 900); L.boom(Math.max(.35, q.gain), q.pan); return; }
+    const q = mine ? {gain: 1, pan: 0} : spat(x, y, 500); L.power(q.gain * (mine ? 1 : .45), q.pan);
+  },
+  fell(mine, x, y) { const q = mine ? {gain: 1, pan: 0} : spat(x, y, 700); L.fall(q.gain * (mine ? 1 : .5), q.pan); },
+  bump(x, y, same, speed, mine) {
+    const t = performance.now(); if (t - lastBump < 70) return; lastBump = t;
+    const q = spat(x, y, 650), g = Math.min(1, .35 + speed / 14) * (mine ? 1.3 : 1) * Math.max(.2, q.gain);
+    if (same) { SFX.tone(240, .14, {to: 90, type: 'square', vol: .22, gain: g, pan: q.pan}); SFX.noise(.08, {type: 'lowpass', fc: 900, vol: .3, gain: g, pan: q.pan}); }
+    else { SFX.tone(1568, .18, {to: 980, type: 'p12', vol: .14, gain: g, pan: q.pan, vib: [30, 40]}); SFX.tone(392, .1, {to: 200, type: 'triangle', vol: .25, gain: g, pan: q.pan}); }
+  },
+  bots(on) { SFX.tone(on ? 330 : 660, .2, {to: on ? 220 : 880, type: 'triangle', vol: .12}); }
+};
 
 // ------------------------------------------------------------ network ---
 $('name').value = localStorage.getItem('polarity-name') || '';
@@ -126,7 +150,7 @@ $('play').onclick = start;
 $('name').onkeydown = e => { if (e.key === 'Enter') start(); };
 
 function start() {
-  if (!actx) try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  SFX.ctx(); L.click();
   const n = $('name').value.trim() || 'Player';
   localStorage.setItem('polarity-name', n);
   joined = true;
@@ -157,6 +181,7 @@ function onSnap(s) {
   for (const p of s.p) { cur.byId[p[0]] = p; names[p[0]] = p[9]; }
   $('best').textContent = s.hs[0] ? 'all-time best: ' + s.hs[1] + ' with ' + s.hs[0] : '';
   for (const e of s.e) onEvent(e);
+  snapSounds();
 }
 
 function onEvent([type, a, b]) {
@@ -165,30 +190,65 @@ function onEvent([type, a, b]) {
     const gold = b > 1;
     if (pa) burst(pa[1], pa[2], gold ? GOLD : pa[3] > 0 ? PLUS : MINUS, gold ? 30 : 10, gold ? 200 : 120);
     if (gold) addFeed(names[a] + ' grabbed a golden orb +' + b, GOLD);
-    if (a === me) gold ? [880, 1175, 1568].forEach((f, i) => setTimeout(() => beep(f, .12, 'triangle', .07), i * 70))
-                       : beep(660, .09, 'triangle', .07, 500);
+    if (pa) snd.orb(a === me, pa[1], pa[2], gold);
   } else if (type === 4) {
     const [nm, col] = POWER[b];
     addFeed(names[a] + ' grabbed ' + nm, col);
     if (pa) {
       burst(pa[1], pa[2], col, 24, 180);
       if (b === 4) effects.push({ring: 1, x: pa[1], y: pa[2], t: 0, big: 1});
+      snd.power(a === me, pa[1], pa[2], b);
     }
-    if (b === 4) beep(90, .5, 'sawtooth', .09, -50);
-    else if (a === me) beep(440, .25, 'square', .05, 600);
   } else if (type === 2) {
     const last = prev && prev.byId[a];
-    if (last) { burst(last[1], last[2], '#ffffff', 26, 220); effects.push({ring: 1, x: last[1], y: last[2], t: 0}); }
+    if (last) { burst(last[1], last[2], '#ffffff', 26, 220); effects.push({ring: 1, x: last[1], y: last[2], t: 0}); snd.fell(a === me, last[1], last[2]); }
     if (b >= 0) addFeed(names[b] + ' → ' + names[a] + ' into the void', b === me ? GOLD : '#c8ccef');
     else addFeed(names[a] + ' fell off', '#8a90b8');
-    if (a === me) beep(300, .5, 'sawtooth', .06, -260);
-    if (b === me) { beep(523, .1, 'square', .05); setTimeout(() => beep(784, .16, 'square', .05), 90); }
+    if (b === me) setTimeout(() => L.coin(1), 250);
   } else if (type === 5) {
     addFeed(names[a] + (b ? ' brought the bots back' : ' started a duel – no bots'), GOLD);
-    beep(b ? 330 : 660, .2, 'triangle', .06, b ? -100 : 200);
+    snd.bots(b);
   } else if (type === 3) {
-    if (a === me) [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, .18, 'triangle', .07), i * 110));
+    if (a === me) L.fanfare();
+    else if (me >= 0) L.sad();
   }
+}
+
+// sounds derived from comparing two snapshots: collisions, countdown, shrink alarm, spawns
+let lastSec = -1, shrinkAlarm = false, edgeT = 0;
+function snapSounds() {
+  if (!prev) return;
+  if (prev.im && !cur.im) { L.go(); shrinkAlarm = false; lastSec = -1; }
+  // magnets touching: loudest for hits that involve you
+  const ps = cur.p;
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+    const A = ps[i], B = ps[j], qa = prev.byId[A[0]], qb = prev.byId[B[0]];
+    if (!A[5] || !B[5] || !qa || !qb) continue;
+    const d = Math.hypot(A[1] - B[1], A[2] - B[2]), pd = Math.hypot(qa[1] - qb[1], qa[2] - qb[2]);
+    if (d < 44 && pd >= 44) snd.bump((A[1] + B[1]) / 2, (A[2] + B[2]) / 2, A[3] === B[3], pd - d, A[0] === me || B[0] === me);
+  }
+  // other players' surges / respawns
+  for (const p of ps) {
+    const q = prev.byId[p[0]];
+    if (!q) continue;
+    if (p[6] && !q[6] && p[0] !== me) snd.surge(false, p[1], p[2]);
+    if (p[5] && !q[5] && p[0] === me) SFX.seq([[60, 1], [67, 1], [72, 2]], {step: .06, type: 'p25', vol: .1});
+  }
+  // new power-up / golden orb appeared on the field
+  const nu = cur.u && cur.u.length, pu = prev.u && prev.u.length;
+  if (nu && (!pu || cur.u[0] !== prev.u[0] || cur.u[1] !== prev.u[1])) { const q = spat(cur.u[1], cur.u[2], 900); L.power(Math.max(.3, q.gain) * .6, q.pan); }
+  const gold = o => o.o.reduce((n, x) => n + (x[2] === 2), 0);
+  if (gold(cur) > gold(prev)) SFX.seq([[91, 1], [96, 1], [100, 1], [96, 1], [103, 2]], {step: .05, type: 'p12', vol: .06});
+  if (cur.im) return;
+  // round clock: tick over the last 10 s, higher for the last 3
+  const sec = Math.ceil(cur.t / 10);
+  if (sec !== lastSec) { lastSec = sec; if (sec <= 10 && sec > 0) { L.tick(sec <= 3); if (sec <= 3) setTimeout(() => L.tick(true), 120); } }
+  // arena shrinking: alarm once, then a warning beep while you stand near the edge
+  if (cur.R < ARENA0) {
+    if (!shrinkAlarm) { shrinkAlarm = true; L.siren(.9); }
+    const mp = cur.byId[me], now = performance.now();
+    if (mp && mp[5] && Math.hypot(mp[1], mp[2]) > cur.R - 70 && now - edgeT > 260) { edgeT = now; SFX.tone(1000, .06, {vol: .09}); }
+  } else shrinkAlarm = false;
 }
 
 function addFeed(text, color) {
@@ -213,9 +273,9 @@ function send(m) { if (ws && ws.readyState === 1) ws.send(m); }
 function flip() {
   send('f');
   const p = cur && cur.byId[me];
-  if (p) beep(p[3] > 0 ? 330 : 440, .06, 'square', .04);
+  if (p) snd.flip(p[3]);
 }
-function surge() { send('s'); beep(180, .35, 'sawtooth', .05, 400); }
+function surge() { send('s'); snd.surge(true); }
 
 function bindBtn(id, fn) {
   $(id).addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); fn(); }, {passive: false});

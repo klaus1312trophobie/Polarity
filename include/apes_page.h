@@ -54,7 +54,7 @@ const char APES_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
   #mute{position:fixed;top:8px;right:10px;background:#6b3f1d;color:var(--ink);padding:4px 10px;z-index:5}
 </style></head>
 <body>
-<button id="mute">🔊</button>
+<button id="mute" class="mutebtn">🔊</button>
 <div id="wrap">
   <h1>🐒 AFFENSCHLACHT <small>die Kackwurf-Edition</small></h1>
   <canvas id="cv" width="800" height="450"></canvas>
@@ -78,6 +78,7 @@ const char APES_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
   <button id="go">MITSPIELEN</button>
   <p style="font-size:12px">Allein? Dann spielt die Gorilla-KI mit. Zu zweit: einfach zweites Handy öffnen.</p>
 </div></div>
+<script src="/sfx.js"></script>
 <script>
 'use strict';
 const W=800,H=450,CW=4,NC=200,WA=96,WB=103;
@@ -88,7 +89,7 @@ const NAMES=['Bananen-Bernd','Kack-Kevin','Sack-Steve','Arsch-Axel','Affen-Alfre
 const FLAVOR=['%s kratzt sich am Sack und denkt nach…','%s wühlt sich im Arsch nach Munition…','%s drückt noch eine Ladung raus…','%s spielt kurz an sich rum und zielt dann…','%s flucht wie ein Bierkutscher…'];
 const WORDS=['PLATSCH!','FLATSCH!','SCHEISSE!','PFFFT!','BLÖRP!','ARSCH!','SPRITZ!'];
 let dx=[0,0],dy=[0,0],flashKey='',flash=null,ws,me=-2,myQ=0,S=null,HH=new Int16Array(NC),joined=null,anim=null,parts=[],pops=[],bubbles=[],bq=[],bqEnd=0;
-let ang=50,pow=65,rx=0,thrown=false,hurt=[0,0],lastHp=[100,100],aim=[40,40],flavor=0,muted=false,shake=0,AC=null,lastTurnKey='';
+let ang=50,pow=65,rx=0,thrown=false,hurt=[0,0],lastHp=[100,100],aim=[40,40],flavor=0,shake=0,AC=null,lastTurnKey='',lastPhA=-1,lastTick=-1,lastWind=null,lastPu=[0,0];
 
 // ------------------------------------------------------------- network ---
 function connect(){
@@ -106,18 +107,17 @@ function handle(m){
     const first=!S||m.log.some(l=>l.startsWith('Neue Runde'));S=m;rx=performance.now();thrown=false;HH=Int16Array.from(m.h);
     if(first)for(let i=0;i<2;i++){dx[i]=m.x[i];dy[i]=m.y[i];}
     const fk=m.ph+':'+m.turn+':'+m.wind;if(m.ph===1&&fk!==flashKey)flash={t:m.turn===me?'DEIN ZUG!':m.n[m.turn]+' ist dran',until:performance.now()+1400,me:m.turn===me};flashKey=fk;
-    for(let i=0;i<2;i++){if(m.hp[i]<lastHp[i])hurt[i]=performance.now()+1300;lastHp[i]=m.hp[i];}
+    for(let i=0;i<2;i++){if(m.hp[i]<lastHp[i]){hurt[i]=performance.now()+1300;ouch(lastHp[i]-m.hp[i],m.hp[i]<=0);}lastHp[i]=m.hp[i];}
     flavor=Math.floor(Math.random()*FLAVOR.length);
     m.log.forEach(addLog);
     const key=m.ph+':'+m.turn+':'+m.wind+':'+m.hp.join();
-    if(m.ph===1&&m.turn===me&&key!==lastTurnKey)blip([660,880],.1);
-    if(m.ph===3&&m.win>=0&&m.win!==2)win();
+    stSounds(m);
     lastTurnKey=key;ui();
   }
   else if(m.k==='shot'){
     anim={t0:performance.now(),p:m.p,ex:m.ex,done:m.p.map(()=>false),end:0,by:m.by};
     const p=m.p[0];if(p.length>3)aim[m.by]=Math.atan2(p[3]-p[1],Math.abs(p[2]-p[0]))*57.3;
-    whoosh();
+    launch(m.kind);
     if(m.kind>0)pops.push({x:W/2,y:150,t:PU[m.kind].toUpperCase()+'!',until:performance.now()+1500,s:m.kind>=9?44:34});
   }
   else if(m.k==='taunt'){
@@ -153,7 +153,6 @@ function fire(){
 }
 $('fire').onclick=fire;
 
-$('mute').onclick=()=>{muted=!muted;$('mute').textContent=muted?'🔇':'🔊';};
 addEventListener('keydown',e=>{
   if(e.target.id==='nm')return;
   const k=e.key;let c=true;
@@ -164,31 +163,28 @@ addEventListener('keydown',e=>{
 });
 $('nm').value=localStorage.getItem('apename')||NAMES[Math.floor(Math.random()*NAMES.length)];
 function join(){
-  audio();joined=$('nm').value.trim()||'Affe';localStorage.setItem('apename',joined);
+  audio();SFX.lib.click();joined=$('nm').value.trim()||'Affe';localStorage.setItem('apename',joined);
   if(ws.readyState===1)ws.send('j'+joined);
 }
 $('go').onclick=join;$('nm').onkeydown=e=>{if(e.key==='Enter')join();};
 setInterval(ui,500);
 
 // --------------------------------------------------------------- sound ---
-function audio(){
-  if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContext)();}catch(e){}}
-  if(AC&&AC.state==='suspended')AC.resume();return AC;
-}
+function audio(){AC=SFX.ctx();return AC;}
 function tone(f0,f1,dur,type,vol,wob,wd,delay){
-  const c=audio();if(!c||muted)return;const t=c.currentTime+(delay||0);
+  const c=audio();if(!c||SFX.muted)return;const t=c.currentTime+(delay||0);
   const o=c.createOscillator(),gn=c.createGain();o.type=type;
   o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(f1,t+dur);
   gn.gain.setValueAtTime(vol,t);gn.gain.exponentialRampToValueAtTime(.001,t+dur);
   if(wob){const l=c.createOscillator(),lg=c.createGain();l.frequency.value=wob;lg.gain.value=wd;l.connect(lg);lg.connect(o.frequency);l.start(t);l.stop(t+dur);}
-  o.connect(gn);gn.connect(c.destination);o.start(t);o.stop(t+dur);
+  o.connect(gn);gn.connect(SFX.out);o.start(t);o.stop(t+dur);
 }
 function noise(dur,fc,type,vol){
-  const c=audio();if(!c||muted)return;
+  const c=audio();if(!c||SFX.muted)return;
   const b=c.createBuffer(1,c.sampleRate*dur,c.sampleRate),d=b.getChannelData(0);
   for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*(1-i/d.length);
   const s=c.createBufferSource(),f=c.createBiquadFilter(),gn=c.createGain();
-  s.buffer=b;f.type=type;f.frequency.value=fc;gn.gain.value=vol;s.connect(f);f.connect(gn);gn.connect(c.destination);s.start();
+  s.buffer=b;f.type=type;f.frequency.value=fc;gn.gain.value=vol;s.connect(f);f.connect(gn);gn.connect(SFX.out);s.start();
 }
 const slap=()=>{noise(.12,1500,'bandpass',.9);tone(300,80,.1,'square',.35);};
 const burp=()=>{tone(95,55,.6,'sawtooth',.5,16,22);noise(.45,220,'lowpass',.3);};
@@ -199,10 +195,42 @@ const wah=()=>{tone(260,230,.3,'sawtooth',.25);tone(240,210,.3,'sawtooth',.25,0,
 const fart=()=>{tone(120,45,.7,'sawtooth',.5,26,28);noise(.5,300,'lowpass',.4);};
 const monkey=()=>{[0,.18,.4,.58].forEach((d,i)=>tone(i%2?420:520,i%2?380:640,.15,'triangle',.4,12,40,d));};
 const raspberry=()=>{tone(220,140,.6,'square',.22,38,70);};
-const whoosh=()=>noise(.45,1800,'bandpass',.5);
-const splat=()=>{noise(.4,700,'lowpass',.9);tone(160,40,.25,'sine',.6);};
+const whoosh=()=>SFX.lib.whoosh(.9,0,.45);
+const splat=R=>{noise(.4,700,'lowpass',.9);tone(160,40,.25,'sine',.6);if(R>80)SFX.lib.boom(1);else if(R>40)SFX.lib.boom(.45);};
 const blip=(fs,d)=>fs.forEach((f,i)=>tone(f,f,d,'square',.15,0,0,i*d));
-const win=()=>[523,659,784,1047].forEach((f,i)=>tone(f,f,.2,'triangle',.3,0,0,i*.15));
+const win=()=>SFX.lib.fanfare();
+// ---- extra game sounds
+function launch(kind){
+  whoosh();SFX.tone(300,.25,{to:900,type:'p25',vol:.08});
+  if(kind===10)SFX.lib.siren(.8);                       // Arsch-Atombombe
+  else if(kind>0)SFX.lib.power(.9,0);
+}
+function ouch(dmg,ko){
+  SFX.tone(520,.28,{to:140,type:'square',vol:.14,vib:[22,60]});
+  SFX.noise(.15,{type:'lowpass',fc:700,vol:.3});
+  if(dmg>=30)SFX.tone(90,.5,{to:35,type:'sine',vol:.6});
+  if(ko)setTimeout(()=>SFX.seq([[67,1],[64,1],[60,1],[55,1],[48,4]],{step:.12,type:'p25',vol:.14}),350);
+}
+function stSounds(m){
+  const ph=m.ph;
+  if(ph!==lastPhA){
+    if(ph===1&&lastPhA!==1&&lastPhA!==-1)SFX.lib.go();
+    if(ph===3){
+      if(m.win===2)SFX.seq([[60,2],[60,2],[57,6]],{step:.12,type:'triangle',vol:.25});
+      else if(m.win>=0){if(m.win===me)SFX.lib.fanfare();else if(me>=0)SFX.lib.sad();else SFX.seq([[72,1],[76,1],[79,3]],{step:.09,type:'p25',vol:.12});}
+    }
+    lastPhA=ph;
+  }
+  if(ph===1&&m.turn===me&&me>=0){const k=m.ph+':'+m.turn+':'+m.wind+':'+m.hp.join();if(k!==lastTurnKey)SFX.seq([[79,1],[84,2]],{step:.07,type:'p25',vol:.13});}
+  if(m.wind!==lastWind){if(lastWind!==null&&m.wind!==0)SFX.noise(.7,{type:'bandpass',fc:300,fc2:1400,vol:Math.min(.4,Math.abs(m.wind)/60+.08)});lastWind=m.wind;}
+  for(let i=0;i<2;i++){if(m.pu[i]&&m.pu[i]!==lastPu[i]&&m.ph===1)SFX.lib.power(i===me?1:.5,i?.6:-.6);lastPu[i]=m.pu[i];}
+}
+// my turn clock: tick over the last 5 seconds
+setInterval(()=>{
+  if(!S||S.ph!==1||S.turn!==me||me<0||thrown||anim||!(S.t>0)){lastTick=-1;return;}
+  const left=Math.ceil(S.t-(performance.now()-rx)/1000);
+  if(left<=5&&left>0&&left!==lastTick){lastTick=left;SFX.lib.tick(left<=2);}
+},150);
 
 // ----------------------------------------------------------- rendering ---
 const TAUNTS=[
@@ -230,7 +258,7 @@ function splatFx(x,y,R){
   for(let i=0;i<R*1.2;i++){const a=Math.random()*6.28,v=60+Math.random()*220;
     parts.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v+120,life:.7+Math.random()*.8,r:2+Math.random()*4,c:Math.random()<.8?'#6b3f1d':'#8a5a2b'});}
   pops.push({x,y:y+20,t:WORDS[Math.floor(Math.random()*WORDS.length)],until:performance.now()+900,s:R>40?34:24});
-  shake=R>80?32:(R>40?14:6);splat();
+  shake=R>80?32:(R>40?14:6);splat(R);
 }
 function poop(x,y,s,r,stink){
   g.save();g.translate(x,y);g.rotate(r);g.scale(s,s);
