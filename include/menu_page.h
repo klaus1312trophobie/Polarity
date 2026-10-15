@@ -26,9 +26,12 @@ const char MENU_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
   .kl{background:linear-gradient(135deg,#1c2229,#3a424c);border-color:#ffcf5a88}
   .kl h2{color:#ffcf5a;text-shadow:3px 3px 0 #5a4310}
   .live{position:absolute;right:14px;top:14px;font-size:12px;background:#000a;border-radius:99px;padding:4px 10px;min-height:22px}
+  #mus{position:fixed;right:12px;top:12px;background:#000a;color:#e8ecff;border:2px solid #ffffff33;border-radius:99px;
+    padding:8px 14px;font-size:14px;cursor:pointer;font-family:inherit}
   .foot{margin-top:28px;color:#8a90b8;font-size:12px;text-align:center;line-height:1.7}
 </style></head>
 <body>
+  <button id="mus" title="Musik an/aus">🔇 Musik</button>
   <h1>ESP ARCADE</h1>
   <div class="sub">Drei Spiele, ein kleiner Chip. Such dir eins aus.</div>
   <div class="grid">
@@ -65,6 +68,81 @@ async function poll(){
   setTimeout(poll,3000);
 }
 poll();
+
+// 16-bit style chiptune: pulse lead + triangle bass + noise hat, looped
+(function(){
+  const E=60/113/2;                       // eighth note @113 bpm
+  const D=[0,2,4,5,7,9];                  // major scale degrees 1..6 (key of Ab)
+  const n=d=>D[d-1];
+  const intro=[[n(1),1],[n(2),1],[n(4),1],[n(2),1]];
+  const A=[[n(1),1],[n(2),1],[n(4),1],[n(2),1]];
+  // "give you up" / "let you down" share one tune, "run around and desert you" differs - 8 eighths each
+  const B=[[n(6),1],[n(6),1],[n(5),1.5],[null,.5]];
+  const mel=[].concat(
+    A,B,
+    A,B,
+    A,[[n(4),1],[n(4),.5],[n(4),.5],[n(5),.5],[n(3),.5],[n(2),.5],[n(1),.5]]);
+  const bassRoots=[-7,-5,-7,-5,-7,-12];
+  const f=s=>415.3*Math.pow(2,s/12);
+  let ac=null,on=false,timer=null,t0=0,idx=0,bi=0,noiseBuf=null;
+  const btn=document.getElementById('mus');
+  function pulse(freq,t,dur,vol,duty){
+    const o=ac.createOscillator(),g=ac.createGain();
+    const re=new Float32Array(32),im=new Float32Array(32);
+    for(let k=1;k<32;k++)im[k]=2*Math.sin(Math.PI*k*duty)/(Math.PI*k);
+    o.setPeriodicWave(ac.createPeriodicWave(re,im));
+    o.frequency.value=freq;
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.01);
+    g.gain.setValueAtTime(vol,t+dur*.7);g.gain.linearRampToValueAtTime(0,t+dur);
+    o.connect(g).connect(ac.destination);o.start(t);o.stop(t+dur+.02);
+  }
+  function tri(freq,t,dur,vol){
+    const o=ac.createOscillator(),g=ac.createGain();
+    o.type='triangle';o.frequency.value=freq;
+    g.gain.setValueAtTime(vol,t);g.gain.linearRampToValueAtTime(0,t+dur);
+    o.connect(g).connect(ac.destination);o.start(t);o.stop(t+dur+.02);
+  }
+  function hat(t){
+    const s=ac.createBufferSource(),g=ac.createGain(),h=ac.createBiquadFilter();
+    s.buffer=noiseBuf;h.type='highpass';h.frequency.value=6000;
+    g.gain.setValueAtTime(.05,t);g.gain.linearRampToValueAtTime(0,t+.04);
+    s.connect(h).connect(g).connect(ac.destination);s.start(t);s.stop(t+.05);
+  }
+  let pos=0;                              // position in eighths
+  function sched(){
+    while(t0<ac.currentTime+.4){
+      const [semi,len]=mel[idx];
+      if(semi!==null){pulse(f(semi),t0,len*E*.9,.09,.25);pulse(f(semi+12),t0,len*E*.9,.025,.5);}
+      for(let k=Math.ceil(pos);k<pos+len-1e-6;k++){
+        const t=t0+(k-pos)*E;
+        if(k%4===0)tri(f(bassRoots[(k/4)%bassRoots.length]),t,E*3.5,.16);
+        else if(k%2===1)hat(t);
+      }
+      t0+=len*E;pos+=len;idx=(idx+1)%mel.length;
+      if(idx===0)pos=0;
+    }
+    timer=setTimeout(sched,100);
+  }
+  function start(){
+    if(on)return;
+    try{
+      ac=ac||new (window.AudioContext||window.webkitAudioContext)();
+      if(!noiseBuf){noiseBuf=ac.createBuffer(1,2048,ac.sampleRate);
+        const d=noiseBuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;}
+      ac.resume();
+      if(ac.state!=='running'&&ac.state!=='suspended')return;
+      on=true;t0=ac.currentTime+.1;idx=0;pos=0;sched();
+      btn.textContent='🔊 Musik';
+    }catch(e){}
+  }
+  function stop(){on=false;clearTimeout(timer);btn.textContent='🔇 Musik';}
+  btn.onclick=e=>{e.stopPropagation();on?stop():start();muted=!on;};
+  let muted=false;
+  // browsers block autoplay: start on first interaction unless user muted
+  const first=()=>{if(ac&&ac.state!=="running")ac.resume();if(!muted&&!on)start();window.removeEventListener('pointerdown',first);window.removeEventListener('keydown',first);};
+  window.addEventListener('pointerdown',first);window.addEventListener('keydown',first);
+  start();
+})();
 </script>
 </body></html>
 )rawliteral";
