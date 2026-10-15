@@ -20,6 +20,7 @@
 #include "config.h"
 #include "webpage.h"
 #include "apes.h"
+#include "klaus.h"
 #include "menu_page.h"
 
 // ---------------------------------------------------------------- tuning ---
@@ -697,10 +698,11 @@ void setup() {
   http.on("/", [] { http.send_P(200, "text/html", MENU_PAGE); });
   http.on("/polarity", [] { http.send_P(200, "text/html", PAGE); });
   http.on("/apes", [] { http.send_P(200, "text/html", apesPage()); });
+  http.on("/klaus", [] { http.send_P(200, "text/html", klausPage()); });
   http.on("/health", [] {
-    char b[160];
-    snprintf(b, sizeof(b), "{\"players\":%d,\"humans\":%d,\"heap\":%u,\"uptime\":%lu,\"apes\":{\"humans\":%d,\"queue\":%d}}",
-             playerCount(), humanCount(), ESP.getFreeHeap(), millis() / 1000, apesHumans(), apesQueue());
+    char b[220];
+    snprintf(b, sizeof(b), "{\"players\":%d,\"humans\":%d,\"heap\":%u,\"uptime\":%lu,\"apes\":{\"humans\":%d,\"queue\":%d},\"klaus\":{\"humans\":%d,\"queue\":%d}}",
+             playerCount(), humanCount(), ESP.getFreeHeap(), millis() / 1000, apesHumans(), apesQueue(), klausHumans(), klausQueue());
     http.send(200, "application/json", b);
   });
   // unknown paths (incl. phones' connectivity checks in hotspot mode) land on the game
@@ -711,6 +713,7 @@ void setup() {
   http.begin();
 
   apesBegin();
+  klausBegin();
   ws.begin();
   ws.onEvent(onWs);
   ws.enableHeartbeat(3000, 2000, 2);   // drop dead tabs quickly
@@ -723,6 +726,7 @@ void loop() {
   http.handleClient();
   ws.loop();
   apesLoop();
+  klausLoop();
 
   uint32_t now = millis();
   int steps = 0;

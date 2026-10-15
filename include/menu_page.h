@@ -23,12 +23,14 @@ const char MENU_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
   .pol h2 b{color:#ff3b6b;text-shadow:0 0 14px #ff3b6b}
   .ape{background:linear-gradient(135deg,#4a2a10,#a8541f);border-color:#ffb02e88}
   .ape h2{color:#ffe27a;text-shadow:3px 3px 0 #4a2a10}
+  .kl{background:linear-gradient(135deg,#1c2229,#3a424c);border-color:#ffcf5a88}
+  .kl h2{color:#ffcf5a;text-shadow:3px 3px 0 #5a4310}
   .live{position:absolute;right:14px;top:14px;font-size:12px;background:#000a;border-radius:99px;padding:4px 10px;min-height:22px}
   .foot{margin-top:28px;color:#8a90b8;font-size:12px;text-align:center;line-height:1.7}
 </style></head>
 <body>
   <h1>ESP ARCADE</h1>
-  <div class="sub">Zwei Spiele, ein kleiner Chip. Such dir eins aus.</div>
+  <div class="sub">Drei Spiele, ein kleiner Chip. Such dir eins aus.</div>
   <div class="grid">
     <a class="game pol" href="/polarity">
       <div class="live" id="lp"></div>
@@ -42,6 +44,12 @@ const char MENU_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
       <h2>AFFENSCHLACHT</h2>
       <p>Zwei Affen, eine Mauer, jede Menge Kacke. Rundenbasiert über die Mauer werfen, Power-Ups einsammeln, den Gegner einsauen. Ist besetzt? Dann schaust du zu und löst den Verlierer ab.</p>
     </a>
+    <a class="game kl" href="/klaus">
+      <div class="live" id="lk"></div>
+      <div class="ic">🛗💨</div>
+      <h2>KLAUSTROPHOBIE</h2>
+      <p>Ein überfüllter Fahrstuhl, neun Etagen, null Luft. Zwiebelbrot-Karl, die Parfümtante und ein Hund steigen zu. Furze, ellbogen und drück Tür-zu, bis nur noch einer drinsteht. Bis zu 6 Spieler.</p>
+    </a>
   </div>
   <div class="foot">Tipp: Zum Wechseln einfach hierher zurück (⬅ Spielauswahl).<br>Bots füllen leere Plätze auf.</div>
 <script>
@@ -49,6 +57,8 @@ async function poll(){
   try{
     const h=await (await fetch('/health')).json();
     document.getElementById('lp').textContent=h.humans?h.humans+' spielen':'frei';
+    const k=h.klaus;
+    document.getElementById('lk').textContent=k.humans?k.humans+' fahren'+(k.queue?', '+k.queue+' warten':''):'frei';
     const a=h.apes;
     document.getElementById('la').textContent=a.humans>=2?(a.queue?a.queue+' warten':'läuft – zuschauen'):(a.humans?'1 wartet auf dich':'frei');
   }catch(e){}
